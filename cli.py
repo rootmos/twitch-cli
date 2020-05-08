@@ -156,6 +156,25 @@ class Client:
             r.raise_for_status()
             return r.json()
 
+    def streams(self, user):
+        try:
+            users = list(user)
+        except TypeError:
+            users = [user]
+
+        ss = []
+        while len(users) > 0:
+            p = { "user_id": [u.user_id for u in users[:100]] }
+            while True:
+                j = self.get("https://api.twitch.tv/helix/streams", params=p)
+                for i in j["data"]:
+                    ss.append(Stream.from_json(self, i))
+                if "cursor" not in j["pagination"]: break
+                p["after"] = j["pagination"]["cursor"]
+            users = users[100:]
+
+        return ss
+
 class User:
     def __init__(self, client, user_id, user_name):
         self.client = client
@@ -194,13 +213,12 @@ class User:
                 vs.append(v)
 
             if "cursor" not in j["pagination"]: break
-
             p["after"] = j["pagination"]["cursor"]
 
         return vs
 
 class Video:
-    def __init__(self, client, video_id, title, user, url, created_at, published_at):
+    def __init__(self, client, video_id, title, user, url, created_at, published_at, duration):
         self.client = client
         self.video_id = video_id
         self.title = title
@@ -208,6 +226,7 @@ class Video:
         self.url = url
         self.created_at = created_at
         self.published_at = published_at
+        self.duration = duration
 
     def __str__(self):
         return self.title
@@ -233,6 +252,29 @@ class Video:
             user=User(client, user_id=j["user_id"], user_name=j["user_name"]),
             created_at=created_at,
             published_at=published_at,
+            duration=j["duration"],
+        )
+
+class Stream:
+    def __init__(self, client, user, title):
+        self.client = client
+        self.user = user
+        self.title = title
+
+    def __str__(self):
+        return self.title
+
+    def __repr__(self):
+        return f"{self.user.user_name}: {self.title}"
+
+    @property
+    def url(self):
+        return f"https://twitch.tv/{self.user.user_name}"
+
+    def from_json(client, j):
+        return Stream(client,
+            title=j["title"],
+            user=User(client, user_id=j["user_id"], user_name=j["user_name"]),
         )
 
 if __name__ == "__main__":
@@ -248,13 +290,24 @@ if __name__ == "__main__":
             vs += f.result()
     vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
 
-    max_user_name_length = max([len(v.user.user_name) for v in vs])
+    ss = c.streams(fs)
 
-    ls = {}
+    max_user_name_length = max([len(v.user.user_name) for v in vs] + [len(s.user.user_name) for s in ss])
+    max_duration_length = max([len(v.duration) for v in vs])
+
+    urls = {}
+    stdin = ""
+    for s in ss:
+        l = f"{s.user.user_name.ljust(max_user_name_length)} {' ' * max_duration_length} {s.title}"
+        urls[l] = s.url
+        stdin += l + "\n"
+
     for v in vs:
-        ls[f"{v.user.user_name.ljust(max_user_name_length)}  {v.title}"] = v.url
+        l = f"{v.user.user_name.ljust(max_user_name_length)} {v.duration.ljust(max_duration_length)} {v.title}"
+        urls[l] = v.url
+        stdin += l + "\n"
 
     p = subprocess.Popen("dmenu -l 20", shell=True, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    (selection, _) = p.communicate(input="\n".join(ls.keys()))
+    (selection, _) = p.communicate(input=stdin)
     for l in selection.splitlines():
-        print(ls[l])
+        print(urls[l])
