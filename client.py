@@ -4,6 +4,9 @@ import os
 import uuid
 import json
 import requests
+import dateutil.parser
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode, urlparse, parse_qs
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -125,14 +128,111 @@ class Client:
         else:
             raise ValueError("specify either token or scope")
 
-    def user(self):
+    def me(self):
         h = { "Authorization": f"OAuth {self.token}" }
-        j = requests.get("https://id.twitch.tv/oauth2/validate", headers=h).json()
-        return {
-            "user_name": j["login"],
-            "user_id": j["user_id"],
-        }
+        r = requests.get("https://id.twitch.tv/oauth2/validate", headers=h)
+        r.raise_for_status()
+        j = r.json()
+        return User(self, user_name=j["login"], user_id=j["user_id"])
+
+    def get(self, url, params=None):
+        h = { "Authorization": f"Bearer {self.token}", "Client-ID": client_id }
+        while True:
+            r = requests.get(url, params=params, headers=h)
+            if r.status_code == 429:
+                l = r.headers["Ratelimit-Limit"]
+                t = int(r.headers["Ratelimit-Reset"])
+                w = (t - time.time()) / 10
+                print(f"calm down! limit={l} reset={t} wait={w}")
+                time.sleep(w)
+                continue
+
+            r.raise_for_status()
+            return r.json()
+
+class User:
+    def __init__(self, client, user_id, user_name):
+        self.client = client
+        self.user_id = user_id
+        self.user_name = user_name
+
+    def __str__(self):
+        return self.user_name
+
+    def __repr__(self):
+        return f"{self.user_name} ({self.user_id})"
+
+    def following(self):
+        p = { "from_id": self.user_id, "first": 100 }
+        us = []
+        while True:
+            j = self.client.get("https://api.twitch.tv/helix/users/follows", params=p)
+            for i in j["data"]:
+                us.append(User(self.client, user_id=i["to_id"], user_name=i["to_name"]))
+
+            if len(us) == j["total"]: break
+
+            p["after"] = j["pagination"]["cursor"]
+
+        return us
+
+    def videos(self, since=None):
+        p = { "user_id": self.user_id, "first": 100, "sort": "time" }
+        vs = []
+        while True:
+            j = self.client.get("https://api.twitch.tv/helix/videos", params=p)
+            for i in j["data"]:
+                v = Video.from_json(self, i)
+                if since is not None and v.created_at < since:
+                    return vs
+                vs.append(v)
+
+            if "cursor" not in j["pagination"]: break
+
+            p["after"] = j["pagination"]["cursor"]
+
+        return vs
+
+class Video:
+    def __init__(self, client, video_id, title, user, url, created_at, published_at):
+        self.client = client
+        self.video_id = video_id
+        self.title = title
+        self.user = user
+        self.url = url
+        self.created_at = created_at
+        self.published_at = published_at
+
+    def __str__(self):
+        return self.title
+
+    def __repr__(self):
+        return f"{self.user.user_name}: {self.title} ({self.video_id})"
+
+    def from_json(client, j):
+        if "created_at" in j and j["created_at"] is not None:
+            created_at = dateutil.parser.isoparse(j["created_at"])
+        else:
+            created_at = None
+
+        if "published_at" in j and j["published_at"] is not None:
+            published_at = dateutil.parser.isoparse(j["published_at"])
+        else:
+            published_at = None
+
+        return Video(client,
+            video_id=j["id"],
+            title=j["title"],
+            url=j["url"],
+            user=User(client, user_id=j["user_id"], user_name=j["user_name"]),
+            created_at=created_at,
+            published_at=published_at,
+        )
 
 if __name__ == "__main__":
     c = Client(scope="")
-    print(c.user())
+
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    for f in c.me().following():
+        for v in f.videos(since=since):
+            print(f"{v.user.user_name}\t{v.created_at}\t{v.title}")
