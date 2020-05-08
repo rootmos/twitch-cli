@@ -6,6 +6,9 @@ import json
 import requests
 import dateutil.parser
 import time
+import concurrent.futures
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode, urlparse, parse_qs
@@ -16,6 +19,9 @@ redirect_host = "localhost"
 redirect_port = 37876
 redirect_path = "/redirect"
 redirect_uri = f"http://{redirect_host}:{redirect_port}{redirect_path}"
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 def new_token(scope):
     state = str(uuid.uuid4())
@@ -29,7 +35,7 @@ def new_token(scope):
 
     url = "https://id.twitch.tv/oauth2/authorize?" + urlencode(q)
 
-    print(url)
+    eprint(url)
     os.system(f"xdg-open '{url}'")
 
     token = None
@@ -143,7 +149,7 @@ class Client:
                 l = r.headers["Ratelimit-Limit"]
                 t = int(r.headers["Ratelimit-Reset"])
                 w = (t - time.time()) / 10
-                print(f"calm down! limit={l} reset={t} wait={w}")
+                eprint(f"calm down! limit={l} reset={t} wait={w}")
                 time.sleep(w)
                 continue
 
@@ -177,7 +183,7 @@ class User:
         return us
 
     def videos(self, since=None):
-        p = { "user_id": self.user_id, "first": 100, "sort": "time" }
+        p = { "user_id": self.user_id, "first": 10, "sort": "time" }
         vs = []
         while True:
             j = self.client.get("https://api.twitch.tv/helix/videos", params=p)
@@ -233,6 +239,22 @@ if __name__ == "__main__":
     c = Client(scope="")
 
     since = datetime.now(timezone.utc) - timedelta(days=1)
-    for f in c.me().following():
-        for v in f.videos(since=since):
-            print(f"{v.user.user_name}\t{v.created_at}\t{v.title}")
+
+    fs = c.me().following()
+
+    vs = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
+        for f in [ ex.submit(lambda f: f.videos(since=since), f) for f in fs ]:
+            vs += f.result()
+    vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
+
+    max_user_name_length = max([len(v.user.user_name) for v in vs])
+
+    ls = {}
+    for v in vs:
+        ls[f"{v.user.user_name.ljust(max_user_name_length)}  {v.title}"] = v.url
+
+    p = subprocess.Popen("dmenu -l 20", shell=True, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    (selection, _) = p.communicate(input="\n".join(ls.keys()))
+    for l in selection.splitlines():
+        print(ls[l])
