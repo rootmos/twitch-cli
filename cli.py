@@ -280,7 +280,7 @@ class Stream:
 if __name__ == "__main__":
     c = Client(scope="")
 
-    since = datetime.now(timezone.utc) - timedelta(days=1)
+    since = datetime.now(timezone.utc) - timedelta(days=3)
 
     fs = c.me().following()
 
