@@ -245,7 +245,7 @@ class User:
         return vs
 
 class Video:
-    def __init__(self, client, video_id, title, user, url, created_at, published_at, duration):
+    def __init__(self, client, video_id, title, user, url, created_at, published_at, duration, typ):
         self.client = client
         self.video_id = video_id
         self.title = title
@@ -254,6 +254,7 @@ class Video:
         self.created_at = created_at
         self.published_at = published_at
         self.duration = duration
+        self.typ = typ
 
     def __str__(self):
         return self.title
@@ -280,6 +281,7 @@ class Video:
             created_at=created_at,
             published_at=published_at,
             duration=j["duration"],
+            typ=j["type"],
         )
 
 class Stream:
@@ -303,6 +305,20 @@ class Stream:
             title=j["title"],
             user=User.from_json(client, j),
         )
+
+def dmenu(choices):
+    d = {}
+    stdin = ""
+    for (l, v) in choices:
+        d[l] = v
+        stdin += l + '\n'
+
+    p = subprocess.Popen("dmenu -l 20", shell=True, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    (selection, _) = p.communicate(input=stdin)
+    vs = []
+    for l in selection.splitlines():
+        vs.append(d[l])
+    return vs
 
 def parse_args():
     parser = argparse.ArgumentParser(description='twitch cli')
@@ -339,19 +355,14 @@ if __name__ == "__main__":
     max_user_name_length = max([len(v.user.user_name) for v in vs] + [len(s.user.user_name) for s in ss])
     max_duration_length = max([len(v.duration) for v in vs])
 
-    urls = {}
-    stdin = ""
+    choices = []
     for s in ss:
-        l = f"{s.user.user_name.ljust(max_user_name_length)} {' ' * max_duration_length} {s.title}"
-        urls[l] = s.url
-        stdin += l + "\n"
+        l = f"{s.user.user_name.ljust(max_user_name_length)} {' ' * max_duration_length}   {s.title}"
+        choices.append((l, s.url))
 
     for v in vs:
-        l = f"{v.user.user_name.ljust(max_user_name_length)} {v.duration.ljust(max_duration_length)} {v.title}"
-        urls[l] = v.url
-        stdin += l + "\n"
+        l = f"{v.user.user_name.ljust(max_user_name_length)} {v.duration.ljust(max_duration_length)} {v.typ[0]} {v.title}"
+        choices.append((l, v.url))
 
-    p = subprocess.Popen("dmenu -l 20", shell=True, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    (selection, _) = p.communicate(input=stdin)
-    for l in selection.splitlines():
-        print(urls[l])
+    for c in dmenu(choices):
+        print(c)
