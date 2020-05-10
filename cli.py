@@ -306,14 +306,35 @@ class Stream:
             user=User.from_json(client, j),
         )
 
-def dmenu(choices):
-    d = {}
-    stdin = ""
-    for (l, v) in choices:
-        d[l] = v
-        stdin += l + '\n'
+def tabularize(rows, pad=" ", sep=" "):
+    s = [0] * max([len(r) for r in rows])
+    for r in rows:
+        for i, c in enumerate(r):
+            s[i] = max(s[i], len(c))
 
-    p = subprocess.Popen("dmenu -l 20", shell=True, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    ls = []
+    for r in rows:
+        l = ""
+        for i, c in enumerate(r):
+            if i + 1 < len(r):
+                l += c.ljust(s[i], pad[0]) + sep
+            else:
+                l += c
+        ls.append(l)
+    return ls
+
+def dmenu(choices, lines=20):
+    d = {}
+    if all([isinstance(c, tuple) for c in choices]):
+        for c in choices:
+            d[c[0]] = c[1]
+        stdin = '\n'.join(tabularize([l for (l, v) in choices]))
+    else:
+        for c in choices:
+            d[c] = c
+        stdin = '\n'.join(choices)
+
+    p = subprocess.Popen(f"dmenu -l {lines}", shell=True, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     (selection, _) = p.communicate(input=stdin)
     vs = []
     for l in selection.splitlines():
@@ -323,6 +344,9 @@ def dmenu(choices):
 def parse_args():
     parser = argparse.ArgumentParser(description='twitch cli')
     parser.add_argument("--following", help="print channels you're following", action="store_true")
+    parser.add_argument("--menu", help="run dmenu", action="store_true")
+    parser.add_argument("--menu-lines", type=int, default=20, help="number of maximum lines in the menu")
+    parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
     parser.add_argument('channels', metavar='CHANNEL', nargs='*',
                         help='channel to act on (defaults to followed channels)')
     parser.add_argument('--since', type=int, default=3, help='days to list videos')
@@ -334,7 +358,11 @@ if __name__ == "__main__":
     c = Client(scope="")
 
     if args.following:
-        for f in c.me().following(): print(f.user_name)
+        fs = c.me().following()
+        if args.menu:
+            for c in dmenu([f.user_name for f in fs], lines=args.menu_lines): print(c)
+        else:
+            for f in fs: print(f.user_name)
         sys.exit(0)
 
     if len(args.channels) > 0:
@@ -350,19 +378,18 @@ if __name__ == "__main__":
             vs += f.result()
     vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
 
-    ss = c.streams(fs)
-
-    max_user_name_length = max([len(v.user.user_name) for v in vs] + [len(s.user.user_name) for s in ss])
-    max_duration_length = max([len(v.duration) for v in vs])
+    def clean_title(t):
+        t = t.replace('\n', ' ')
+        t = t.encode("ascii", "ignore")
+        return str(t[:args.title_max_length], "ascii")
 
     choices = []
-    for s in ss:
-        l = f"{s.user.user_name.ljust(max_user_name_length)} {' ' * max_duration_length}   {s.title}"
-        choices.append((l, s.url))
-
+    for s in c.streams(fs):
+        choices.append(((s.user.user_name, "", "", clean_title(s.title)), s.url))
     for v in vs:
-        l = f"{v.user.user_name.ljust(max_user_name_length)} {v.duration.ljust(max_duration_length)} {v.typ[0]} {v.title}"
-        choices.append((l, v.url))
+        choices.append(((v.user.user_name, v.duration, v.typ[0], clean_title(v.title)), v.url))
 
-    for c in dmenu(choices):
-        print(c)
+    if args.menu:
+        for c in dmenu(choices, lines=args.menu_lines): print(c)
+    else:
+        for l in tabularize([r + (u,) for (r, u) in choices]): print(l)
