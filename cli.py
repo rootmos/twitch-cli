@@ -342,7 +342,7 @@ def dmenu(choices, lines=20):
     return vs
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='twitch cli')
+    parser = argparse.ArgumentParser(description='Twitch command line interface')
     parser.add_argument("--following", help="print channels you're following", action="store_true")
     parser.add_argument("--menu", help="run dmenu", action="store_true")
     parser.add_argument("--menu-lines", type=int, default=20, help="number of maximum lines in the menu")
