@@ -326,9 +326,10 @@ def tabularize(rows, pad=" ", sep=" "):
 def dmenu(choices, lines=20):
     d = {}
     if all([isinstance(c, tuple) for c in choices]):
-        for c in choices:
-            d[c[0]] = c[1]
-        stdin = '\n'.join(tabularize([l for (l, v) in choices]))
+        cs = tabularize([l for (l, v) in choices])
+        for i, c in enumerate(cs):
+            d[c] = choices[i][1]
+        stdin = '\n'.join(cs)
     else:
         for c in choices:
             d[c] = c
