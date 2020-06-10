@@ -574,6 +574,65 @@ def run_manager(args):
             for k, v in d.items():
                 print(f"{k}: {v}")
 
+class IRCMessage:
+    def __init__(self, bs):
+        self.raw = bs
+        s = str(bs, "UTF-8")
+        self.tags, s = IRCMessage.__parse_tags(s)
+        self.prefix, s = IRCMessage.__parse_prefix(s)
+        self.command, s = IRCMessage.__parse_command(s)
+        self.params, self.trailing = IRCMessage.__parse_params(s, [])
+
+    def __repr__(self):
+        props = []
+        if self.prefix is not None: props.append(f"prefix={self.prefix}")
+        if self.tags is not None: props.append(f"tags={self.tags}")
+        if self.command is not None: props.append(f"command={self.command}")
+        if len(self.params) > 0: props.append(f"params={self.params}")
+        if self.trailing is not None: props.append(f"trailing={self.trailing}")
+        return f"IRCMessage({','.join(props)})"
+
+    def __parse_prefix(s):
+        if s[0] == ':':
+            i = s.index(' ')
+            return s[1:i], s[i:]
+        else:
+            return s
+
+    def __parse_command(s):
+        m = re.match("([ ]+)(\w+)|(\d\d\d) ", s)
+        cmd = m.group(2)
+        return cmd, s[len(m.group(1)) + len(cmd):]
+
+    def __parse_params(s, acc):
+        if re.fullmatch("[ ]*", s):
+            return acc, None
+
+        m = re.fullmatch("[ ]*:(.*)", s)
+        if m:
+            return acc, m.group(1)
+        else:
+            m = re.match("[ ]*([^ :][^ ]*)(.*)", s)
+            if m is None:
+                raise ValueError(f"<params> don't match: {s}")
+            middle = m.group(1)
+            acc.append(middle)
+            return IRCMessage.__parse_params(m.group(2), acc)
+
+    def __parse_tags(s):
+        if s[0] != '@':
+            return {}, s
+        else:
+            return IRCMessage.__parse_tag(s[1:], {})
+
+    def __parse_tag(s, acc):
+        p = re.compile("(\\+?([a-zA-Z0-9\\-]+/)?[a-zA-Z0-9\\-]+)(=([^ ;]*))?[ ;]")
+        m = p.match(s)
+        if m is None: return acc, s
+        acc[m.group(1)] = m.group(4)
+        return IRCMessage.__parse_tag(s[m.end(0):], acc)
+
+
 class Chat:
     def __init__(self, *channels):
         # TODO: ssl
@@ -599,7 +658,8 @@ class Chat:
         self.input += bytes(line + "\n", "UTF-8")
 
     def emit_line(self, line):
-        print(line)
+        l = IRCMessage(line)
+        print(l)
 
     def handle_output(self, bs=None):
         if bs is not None:
