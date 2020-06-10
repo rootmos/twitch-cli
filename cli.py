@@ -24,6 +24,7 @@ redirect_path = "/redirect"
 redirect_uri = f"http://{redirect_host}:{redirect_port}{redirect_path}"
 
 helix_url = "https://api.twitch.tv/helix"
+kraken_url = "https://api.twitch.tv/kraken"
 oauth2_url = "https://id.twitch.tv/oauth2"
 
 # utils
@@ -79,7 +80,7 @@ def new_token(scope):
         "state": state,
     }
 
-    url = "{oauth2_url}/authorize?" + urlencode(q)
+    url = f"{oauth2_url}/authorize?{urlencode(q)}"
 
     eprint(url)
     os.system(f"xdg-open '{url}'")
@@ -189,8 +190,21 @@ class Client:
         j = r.json()
         return User(self, user_name=j["login"], user_id=j["user_id"])
 
-    def get(self, url, params=None):
-        h = { "Authorization": f"Bearer {self.token}", "Client-ID": client_id }
+    def get(self, url, params=None, kraken=False):
+        if kraken:
+            url = kraken_url + url
+            h = {
+                "Authorization": f"OAuth {self.token}",
+                "Client-ID": client_id,
+                "Accept": "application/vnd.twitchtv.v5+json",
+            }
+        else:
+            url = helix_url + url
+            h = {
+                "Authorization": f"Bearer {self.token}",
+                "Client-ID": client_id,
+            }
+
         while True:
             r = requests.get(url, params=params, headers=h)
             if r.status_code == 429:
@@ -214,7 +228,7 @@ class Client:
         while len(users) > 0:
             p = { "user_id": [u.user_id for u in users[:100]] }
             while True:
-                j = self.get(f"{helix_url}/streams", params=p)
+                j = self.get("/streams", params=p)
                 for i in j["data"]:
                     ss.append(Stream.from_twitch_json(self, i))
                 if "cursor" not in j["pagination"]: break
@@ -223,27 +237,26 @@ class Client:
 
         return ss
 
-    def user(self, name):
-        try:
-            names = list(name)
-        except TypeError:
-            names = [name]
-
+    def user(self, *names):
         us = []
         while len(names) > 0:
             p = { "login": names[:100] }
-            j = self.get(f"{helix_url}/users", params=p)
+            j = self.get("/users", params=p)
             for i in j["data"]:
                 us.append(User.from_twitch_json(self, i))
             names = names[100:]
 
         return us
 
+    def channel(self, id):
+        return Channel.from_twitch_json(self, self.get(f"/channels/{id}", kraken=True))
+
 class User:
-    def __init__(self, client, user_id, user_name):
+    def __init__(self, client, user_id, user_name, title=None):
         self.client = client
         self.user_id = user_id
         self.user_name = user_name
+        self._channel = None
 
     def __str__(self):
         return self.user_name
@@ -251,17 +264,25 @@ class User:
     def __repr__(self):
         return f"{self.user_name} ({self.user_id})"
 
+    @staticmethod
     def from_twitch_json(client, j):
         if "login" in j:
             return User(client, user_id=j["id"], user_name=j["login"])
         else:
             return User(client, user_id=j["user_id"], user_name=j["user_name"])
 
+    @property
+    def channel(self):
+        if self._channel is None:
+            self._channel = self.client.channel(self.user_id)
+
+        return self._channel
+
     def following(self):
         p = { "from_id": self.user_id, "first": 100 }
         us = []
         while True:
-            j = self.client.get(f"{helix_url}/users/follows", params=p)
+            j = self.client.get("/users/follows", params=p)
             for i in j["data"]:
                 us.append(User(self.client, user_id=i["to_id"], user_name=i["to_name"]))
 
@@ -275,7 +296,7 @@ class User:
         p = { "user_id": self.user_id, "first": 10, "sort": "time" }
         vs = []
         while True:
-            j = self.client.get(f"{helix_url}/videos", params=p)
+            j = self.client.get("/videos", params=p)
             for i in j["data"]:
                 v = Video.from_twitch_json(self, i)
                 if since is not None and v.created_at < since:
@@ -286,6 +307,18 @@ class User:
             p["after"] = j["pagination"]["cursor"]
 
         return vs
+
+class Channel:
+    def __init__(self, client, channel_id, status):
+        self.channel_id = channel_id
+        self.status = status
+
+    @staticmethod
+    def from_twitch_json(client, j):
+        return Channel(client,
+            channel_id = j["_id"],
+            status = j["status"],
+        )
 
 class Video:
     def __init__(self, client, video_id, title, user, url, created_at, published_at, duration, typ):
@@ -402,7 +435,7 @@ def dmenu(choices, lines=20):
         vs.append(d[l])
     return vs
 
-def parse_args():
+def parse_args(args):
     parser = argparse.ArgumentParser(description='Twitch command line interface')
     parser.add_argument("--following", help="print channels you're following", action="store_true")
     parser.add_argument("--menu", help="run dmenu", action="store_true")
@@ -412,10 +445,29 @@ def parse_args():
     parser.add_argument('channels', metavar='CHANNEL', nargs='*',
                         help='channel to act on (defaults to followed channels)')
     parser.add_argument('--since', type=int, default=3, help='days to list videos')
-    return parser.parse_args()
+    return parser.parse_args(args)
+
+def parse_manager_args(args):
+    parser = argparse.ArgumentParser(sys.argv[0] + " --manage", description='Twitch stream manager command line interface')
+    parser.add_argument("--title", action="store_true", help="get title")
+    return parser.parse_args(args)
+
+def run_manager(args):
+    c = Client(scope="")
+
+    if args.title:
+        print(c.me().channel.status)
 
 if __name__ == "__main__":
-    args = parse_args()
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--manage", action="store_true")
+    (a, args) = p.parse_known_args()
+
+    if a.manage:
+        run_manager(parse_manager_args(args))
+        sys.exit(0)
+    else:
+        args = parse_args(args)
 
     c = Client(scope="")
 
