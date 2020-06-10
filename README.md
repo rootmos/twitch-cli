@@ -1,7 +1,7 @@
 # [Twitch](https://twitch.tv) command line interface
 
 ## Features
-* list followed channels
+* manage followed channels
 * list videos and active streams of channels
 * [dmenu](https://tools.suckless.org/dmenu/) integration to select channels,
   videos or streams
@@ -23,7 +23,8 @@ however it doesn't list videos (at the time of writing).
 ## Usage
 ```
 usage: cli.py [-h] [--following] [--menu] [--json] [--menu-lines MENU_LINES]
-              [--chat] [--title-max-length TITLE_MAX_LENGTH] [--since SINCE]
+              [--chat] [--follow CHANNEL] [--unfollow CHANNEL]
+              [--title-max-length TITLE_MAX_LENGTH] [--since SINCE]
               [CHANNEL [CHANNEL ...]]
 
 Twitch command line interface
@@ -39,6 +40,8 @@ optional arguments:
   --menu-lines MENU_LINES
                         number of maximum lines in the menu
   --chat                interact with chat
+  --follow CHANNEL      follow CHANNEL (may be used multiple times)
+  --unfollow CHANNEL    unfollow CHANNEL (may be used multiple times)
   --title-max-length TITLE_MAX_LENGTH
                         maximum length of printed titles
   --since SINCE         days to list videos

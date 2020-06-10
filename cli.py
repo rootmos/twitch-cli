@@ -230,7 +230,7 @@ class Client:
 
         return self._me
 
-    def put(self, url, body, kraken=False):
+    def put(self, url, body=None, kraken=False):
         if kraken:
             url = kraken_url + url
             h = {
@@ -246,6 +246,24 @@ class Client:
             }
 
         r = requests.put(url, json=body, headers=h)
+        r.raise_for_status()
+
+    def delete(self, url, body=None, kraken=False):
+        if kraken:
+            url = kraken_url + url
+            h = {
+                "Authorization": f"OAuth {self.token}",
+                "Client-ID": client_id,
+                "Accept": "application/vnd.twitchtv.v5+json",
+            }
+        else:
+            url = helix_url + url
+            h = {
+                "Authorization": f"Bearer {self.token}",
+                "Client-ID": client_id,
+            }
+
+        r = requests.delete(url, json=body, headers=h)
         r.raise_for_status()
 
     def get(self, url, params=None, kraken=False):
@@ -309,6 +327,16 @@ class Client:
     def channel(self, id):
         return Channel.from_twitch_json(self, self.get(f"/channels/{id}", kraken=True))
 
+    def follow(self, *channels):
+        for u in self.user(*channels):
+            self.put(f"/users/{self.me.user_id}/follows/channels/{u.user_id}", kraken=True)
+            logger.info(f"followed {u.user_name} ({u.user_id})")
+
+    def unfollow(self, *channels):
+        for u in self.user(*channels):
+            self.delete(f"/users/{self.me.user_id}/follows/channels/{u.user_id}", kraken=True)
+            logger.info(f"unfollowed {u.user_name} ({u.user_id})")
+
 class User:
     def __init__(self, client, user_id, user_name, title=None):
         self.client = client
@@ -346,6 +374,7 @@ class User:
 
             if len(us) == j["total"]: break
 
+            if "cursor" not in j["pagination"]: break
             p["after"] = j["pagination"]["cursor"]
 
         return us
@@ -540,6 +569,8 @@ def parse_args(args):
     parser.add_argument("--json", help="output json", action="store_true")
     parser.add_argument("--menu-lines", type=int, default=20, help="number of maximum lines in the menu")
     parser.add_argument("--chat", action="store_true", help="interact with chat")
+    parser.add_argument("--follow", metavar="CHANNEL", action="append", help="follow CHANNEL (may be used multiple times)")
+    parser.add_argument("--unfollow", metavar="CHANNEL", action="append", help="unfollow CHANNEL (may be used multiple times)")
     parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
     parser.add_argument('channels', metavar='CHANNEL', nargs='*',
                         help='channel to act on (defaults to followed channels)')
@@ -750,7 +781,15 @@ if __name__ == "__main__":
         asyncio.run(Chat.run(handle_twitch_chat_message, *args.channels))
         sys.exit(0)
 
-    c = Client(scope="")
+    c = Client(scope="user_follows_edit")
+    run_default_action = True
+
+    if args.follow:
+        c.follow(*args.follow)
+        run_default_action = False
+    if args.unfollow:
+        c.unfollow(*args.unfollow)
+        run_default_action = False
 
     if args.following:
         fs = c.me.following()
@@ -761,6 +800,9 @@ if __name__ == "__main__":
                 for f in fs: print('"' + f.user_name + '"')
             else:
                 for f in fs: print(f.user_name)
+        run_default_action = False
+
+    if not run_default_action:
         sys.exit(0)
 
     if len(args.channels) > 0:

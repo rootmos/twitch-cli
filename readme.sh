@@ -8,7 +8,7 @@ cat <<EOF > "$OUT"
 # [Twitch](https://twitch.tv) command line interface
 
 ## Features
-* list followed channels
+* manage followed channels
 * list videos and active streams of channels
 * [dmenu](https://tools.suckless.org/dmenu/) integration to select channels,
   videos or streams
