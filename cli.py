@@ -176,6 +176,7 @@ def get_token(scope):
 
 class Client:
     def __init__(self, token=None, scope=None):
+        self._me = None
         if token is not None:
             self.token = token
         elif scope is not None:
@@ -183,12 +184,15 @@ class Client:
         else:
             raise ValueError("specify either token or scope")
 
+    @property
     def me(self):
-        h = { "Authorization": f"OAuth {self.token}" }
-        r = requests.get(f"{oauth2_url}/validate", headers=h)
-        r.raise_for_status()
-        j = r.json()
-        return User(self, user_name=j["login"], user_id=j["user_id"])
+        if self._me is None:
+            h = { "Authorization": f"OAuth {self.token}" }
+            r = requests.get(f"{oauth2_url}/validate", headers=h)
+            r.raise_for_status()
+            j = r.json()
+            self._me = User(self, user_name=j["login"], user_id=j["user_id"])
+        return self._me
 
     def put(self, url, body, kraken=False):
         if kraken:
@@ -327,10 +331,21 @@ class User:
         return vs
 
 class Channel:
-    def __init__(self, client, channel_id, status):
+    def __init__(self, client, channel_id, status, game, followers, views):
         self.client = client
         self.channel_id = channel_id
         self._status = status
+        self._game = game
+        self.followers = followers
+        self.views = views
+
+    def _setter(self, k, v):
+        self.client.put(
+            f"/channels/{self.channel_id}",
+            body={f"channel[{k}]": v},
+            kraken=True,
+        )
+        return v
 
     @property
     def status(self):
@@ -338,19 +353,34 @@ class Channel:
 
     @status.setter
     def status(self, v):
-        self.client.put(
-            f"/channels/{self.channel_id}",
-            body={"channel[status]": v},
-            kraken=True,
-        )
-        self._status = v
+        self._status = self._setter("status", v)
+
+    @property
+    def game(self):
+        return self._game
+
+    @game.setter
+    def game(self, v):
+        self._game = self._setter("game", v)
 
     @staticmethod
     def from_twitch_json(client, j):
         return Channel(client,
             channel_id = j["_id"],
             status = j["status"],
+            game = j["game"],
+            followers = j["followers"],
+            views = j["views"],
         )
+
+    def to_dict(self):
+        return {
+            "channel_id": self.channel_id,
+            "title": self.status,
+            "category": self.game,
+            "followers": self.followers,
+            "views": self.views,
+        }
 
 class Video:
     def __init__(self, client, video_id, title, user, url, created_at, published_at, duration, typ):
@@ -481,19 +511,38 @@ def parse_args(args):
 
 def parse_manager_args(args):
     parser = argparse.ArgumentParser(sys.argv[0] + " --manage", description='Twitch stream manager command line interface')
-    parser.add_argument("--title", action="store_true", help="get title")
+    parser.add_argument("--title", action="store_true", help="print stream title")
     parser.add_argument("--set-title", metavar="TITLE", help="set stream title")
+    parser.add_argument("--category", action="store_true", help="print stream category")
+    parser.add_argument("--set-category", metavar="CATEGORY", help="set stream category")
+    parser.add_argument("--json", help="output json", action="store_true")
     return parser.parse_args(args)
 
 def run_manager(args):
     c = None
     if args.set_title is not None:
         c = c or Client(scope="channel_editor")
-        c.me().channel.status = args.set_title
+        c.me.channel.status = args.set_title
+
+    if args.set_category is not None:
+        c = c or Client(scope="channel_editor")
+        c.me.channel.game = args.set_category
 
     c = c or Client(scope="")
-    if args.title:
-        print(c.me().channel.status)
+    if args.title or args.category:
+        if args.title:
+            s = c.me.channel.status
+            print(json.dumps(s) if args.json else s)
+        if args.category:
+            s = c.me.channel.game
+            print(json.dumps(s) if args.json else s)
+    else:
+        d = c.me.channel.to_dict()
+        if args.json:
+            print(json.dumps(d))
+        else:
+            for k, v in d.items():
+                print(f"{k}: {v}")
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(add_help=False)
@@ -509,7 +558,7 @@ if __name__ == "__main__":
     c = Client(scope="")
 
     if args.following:
-        fs = c.me().following()
+        fs = c.me.following()
         if args.menu:
             for c in dmenu([f.user_name for f in fs], lines=args.menu_lines): print(c)
         else:
@@ -522,7 +571,7 @@ if __name__ == "__main__":
     if len(args.channels) > 0:
         fs = c.user(args.channels)
     else:
-        fs = c.me().following()
+        fs = c.me.following()
 
     since = datetime.now(timezone.utc) - timedelta(days=args.since)
 
