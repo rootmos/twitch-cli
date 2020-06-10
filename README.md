@@ -20,7 +20,7 @@ however it doesn't list videos (at the time of writing).
 
 ## Usage
 ```
-usage: cli.py [-h] [--following] [--menu] [--menu-lines MENU_LINES]
+usage: cli.py [-h] [--following] [--menu] [--json] [--menu-lines MENU_LINES]
               [--title-max-length TITLE_MAX_LENGTH] [--since SINCE]
               [CHANNEL [CHANNEL ...]]
 
@@ -33,9 +33,26 @@ optional arguments:
   -h, --help            show this help message and exit
   --following           print channels you're following
   --menu                run dmenu
+  --json                output json
   --menu-lines MENU_LINES
                         number of maximum lines in the menu
   --title-max-length TITLE_MAX_LENGTH
                         maximum length of printed titles
   --since SINCE         days to list videos
+```
+### Stream manager
+```
+usage: ./cli.py --manage [-h] [--title] [--set-title TITLE] [--category]
+                         [--set-category CATEGORY] [--json]
+
+Twitch stream manager command line interface
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --title               print stream title
+  --set-title TITLE     set stream title
+  --category            print stream category
+  --set-category CATEGORY
+                        set stream category
+  --json                output json
 ```

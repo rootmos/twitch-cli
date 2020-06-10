@@ -32,4 +32,11 @@ EOF
 
 cat <<EOF >> "$OUT"
 \`\`\`
+### Stream manager
+\`\`\`
+EOF
+./cli.py --manage -h >> "$OUT" 2>&1
+
+cat <<EOF >> "$OUT"
+\`\`\`
 EOF
