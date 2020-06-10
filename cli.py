@@ -377,7 +377,7 @@ class User:
             if "cursor" not in j["pagination"]: break
             p["after"] = j["pagination"]["cursor"]
 
-        return us
+        return sorted(us, key=lambda u: u.user_name.lower())
 
     def videos(self, since=None):
         p = { "user_id": self.user_id, "first": 10, "sort": "time" }
