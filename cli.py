@@ -13,8 +13,10 @@ import re
 import argparse
 import tempfile
 import socket
+import ssl
 import select
 import errno
+import asyncio
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,7 +32,7 @@ redirect_uri = f"http://{redirect_host}:{redirect_port}{redirect_path}"
 helix_url = "https://api.twitch.tv/helix"
 kraken_url = "https://api.twitch.tv/kraken"
 oauth2_url = "https://id.twitch.tv/oauth2"
-irc_addr = ("irc.chat.twitch.tv", 6667)
+irc_addr = ("irc.chat.twitch.tv", 6697)
 
 # utils
 
@@ -642,84 +644,55 @@ class Chat:
         else:
             self.channels = [ u.user_name for u in self.client.user(*channels) ]
 
-        self.input = bytes()
-        self.output = bytes()
+    async def run(self, callback):
+        q = asyncio.Queue()
 
-        # TODO: ssl
-        self.irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.irc.connect(irc_addr)
+        async def send_line(line):
+            q.put_nowait(bytes(line + "\r\n", "UTF-8"))
 
-        self.send_line(f"PASS oauth:{self.client.token}")
-        self.send_line(f"NICK {self.client.me.user_name}")
-        self.send_line("CAP REQ :twitch.tv/membership")
-        self.send_line("CAP REQ :twitch.tv/commands")
-        self.send_line("CAP REQ :twitch.tv/tags")
+        await send_line(f"PASS oauth:{self.client.token}")
+        await send_line(f"NICK {self.client.me.user_name}")
+        await send_line("CAP REQ :twitch.tv/membership")
+        await send_line("CAP REQ :twitch.tv/commands")
+        await send_line("CAP REQ :twitch.tv/tags")
 
         for c in self.channels:
-            self.send_line(f"JOIN #{c}")
+            await send_line(f"JOIN #{c}")
 
-    def send_line(self, line):
-        self.input += bytes(line + "\n", "UTF-8")
+        r, w = await asyncio.open_connection(
+            host = irc_addr[0], port = irc_addr[1],
+            family = socket.AF_INET,
+            ssl = True
+        )
 
-    def handle_output(self, bs, callback):
-        if bs is not None:
-            self.output += bs
+        async def do_read():
+            bs = await r.readuntil(separator=b'\r\n')
+            await callback(self, IRCMessage(bs), send_line)
+            await do_read()
 
-        for i, b in enumerate(self.output):
-            if b == 13 and i + 1 < len(self.output) and self.output[i+1] == 10:
-                callback(self, IRCMessage(self.output[:i]))
-                self.output = self.output[i+2:]
-                return self.handle_output(None, callback)
+        async def do_write():
+            w.write(await q.get())
+            q.task_done()
+            await do_write()
 
-    def run(self, callback):
-        try:
-            self.irc.setblocking(False)
-            running = True
-            while running:
-                ws = [self.irc] if len(self.input) > 0 else []
-                rs, ws, es = select.select([self.irc],ws,[self.irc],1000)
-                for r in rs:
-                    try:
-                        while True:
-                            bs = r.recv(4096)
-                            if len(bs) == 0:
-                                running = False
-                            self.handle_output(bs, callback)
-                    except socket.error as e:
-                        if e.errno != errno.EAGAIN:
-                            raise e
+        await asyncio.gather(do_read(), do_write())
 
-                for w in ws:
-                    try:
-                        while len(self.input) > 0:
-                            n = w.send(self.input)
-                            self.input = self.input[n:]
-                    except socket.error as e:
-                        if e.errno != errno.EAGAIN:
-                            raise e
-
-                for e in es:
-                    raise RuntimeError("error on socket")
-
-        except KeyboardInterrupt:
-            self.irc.close()
-
-def handle_twitch_chat_message(chat, m):
-    if m.command == "PING":
-        chat.send_line(f"PONG {m.trailing}")
+async def handle_twitch_chat_message(chat, msg, send_line):
+    if msg.command == "PING":
+        chat.send_line(f"PONG {msg.trailing}")
         return
 
-    if m.command != "PRIVMSG":
+    if msg.command != "PRIVMSG":
         return
 
-    d = datetime.fromtimestamp(int(m.tags["tmi-sent-ts"])/1000)
+    d = datetime.fromtimestamp(int(msg.tags["tmi-sent-ts"])/1000)
     d = d.isoformat(timespec='seconds')
-    u = m.tags["display-name"]
+    u = msg.tags["display-name"]
 
     if len(chat.channels) > 1:
-        print(f"{d} {m.params[0]} {u}: {m.trailing}")
+        print(f"{d} {msg.params[0]} {u}: {msg.trailing}")
     else:
-        print(f"{d} {u}: {m.trailing}")
+        print(f"{d} {u}: {msg.trailing}")
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(add_help=False)
@@ -733,7 +706,7 @@ if __name__ == "__main__":
         args = parse_args(args)
 
     if args.chat:
-        Chat(*args.channels).run(handle_twitch_chat_message)
+        asyncio.run(Chat(*args.channels).run(handle_twitch_chat_message))
         sys.exit(0)
 
     c = Client(scope="")
