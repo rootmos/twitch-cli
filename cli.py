@@ -11,6 +11,7 @@ import subprocess
 import sys
 import re
 import argparse
+import tempfile
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -513,20 +514,45 @@ def parse_manager_args(args):
     parser = argparse.ArgumentParser(sys.argv[0] + " --manage", description='Twitch stream manager command line interface')
     parser.add_argument("--title", action="store_true", help="print stream title")
     parser.add_argument("--set-title", metavar="TITLE", help="set stream title")
+    parser.add_argument("--edit-title", action="store_true", help="edit stream title using $EDITOR")
     parser.add_argument("--category", action="store_true", help="print stream category")
     parser.add_argument("--set-category", metavar="CATEGORY", help="set stream category")
     parser.add_argument("--json", help="output json", action="store_true")
     return parser.parse_args(args)
 
+def edit(v):
+    with tempfile.NamedTemporaryFile() as f:
+        f.write(bytes(v, "UTF-8"))
+        f.flush()
+
+        e = os.getenv("EDITOR", "vi")
+        if e == "vi" or e == "vim":
+            os.system(f"{e} -b {f.name}")
+        else:
+            os.system(f"$EDITOR -b {f.name}")
+
+        f.seek(0)
+        return str(f.read(), "UTF-8")
+
+
 def run_manager(args):
     c = None
+    run_default_action = True
+
+    if args.edit_title:
+        c = c or Client(scope="channel_editor")
+        c.me.channel.status = edit(c.me.channel.status)
+        run_default_action = False
+
     if args.set_title is not None:
         c = c or Client(scope="channel_editor")
         c.me.channel.status = args.set_title
+        run_default_action = False
 
     if args.set_category is not None:
         c = c or Client(scope="channel_editor")
         c.me.channel.game = args.set_category
+        run_default_action = False
 
     c = c or Client(scope="")
     if args.title or args.category:
@@ -536,7 +562,7 @@ def run_manager(args):
         if args.category:
             s = c.me.channel.game
             print(json.dumps(s) if args.json else s)
-    else:
+    elif run_default_action:
         d = c.me.channel.to_dict()
         if args.json:
             print(json.dumps(d))

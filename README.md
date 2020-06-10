@@ -42,8 +42,8 @@ optional arguments:
 ```
 ### Stream manager
 ```
-usage: ./cli.py --manage [-h] [--title] [--set-title TITLE] [--category]
-                         [--set-category CATEGORY] [--json]
+usage: ./cli.py --manage [-h] [--title] [--set-title TITLE] [--edit-title]
+                         [--category] [--set-category CATEGORY] [--json]
 
 Twitch stream manager command line interface
 
@@ -51,6 +51,7 @@ optional arguments:
   -h, --help            show this help message and exit
   --title               print stream title
   --set-title TITLE     set stream title
+  --edit-title          edit stream title using $EDITOR
   --category            print stream category
   --set-category CATEGORY
                         set stream category
