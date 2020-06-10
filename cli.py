@@ -633,17 +633,21 @@ class IRCMessage:
         acc[m.group(1)] = m.group(4)
         return IRCMessage.__parse_tag(s[m.end(0):], acc)
 
-
 class Chat:
     def __init__(self, *channels):
-        # TODO: ssl
-        self.irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.irc.connect(irc_addr)
-
         self.client = Client(scope="chat:read")
+
+        if len(channels) == 0:
+            self.channels = [self.client.me.user_name]
+        else:
+            self.channels = [ u.user_name for u in self.client.user(*channels) ]
 
         self.input = bytes()
         self.output = bytes()
+
+        # TODO: ssl
+        self.irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.irc.connect(irc_addr)
 
         self.send_line(f"PASS oauth:{self.client.token}")
         self.send_line(f"NICK {self.client.me.user_name}")
@@ -651,30 +655,23 @@ class Chat:
         self.send_line("CAP REQ :twitch.tv/commands")
         self.send_line("CAP REQ :twitch.tv/tags")
 
-        if len(channels) == 0:
-            channels = [self.client.me.user_name]
-
-        for c in channels:
+        for c in self.channels:
             self.send_line(f"JOIN #{c}")
 
     def send_line(self, line):
         self.input += bytes(line + "\n", "UTF-8")
 
-    def emit_line(self, line):
-        l = IRCMessage(line)
-        print(l)
-
-    def handle_output(self, bs=None):
+    def handle_output(self, bs, callback):
         if bs is not None:
             self.output += bs
 
         for i, b in enumerate(self.output):
             if b == 13 and i + 1 < len(self.output) and self.output[i+1] == 10:
-                self.emit_line(self.output[:i])
+                callback(self, IRCMessage(self.output[:i]))
                 self.output = self.output[i+2:]
-                return self.handle_output(None)
+                return self.handle_output(None, callback)
 
-    def run(self):
+    def run(self, callback):
         try:
             self.irc.setblocking(False)
             running = True
@@ -687,7 +684,7 @@ class Chat:
                             bs = r.recv(4096)
                             if len(bs) == 0:
                                 running = False
-                            self.handle_output(bs)
+                            self.handle_output(bs, callback)
                     except socket.error as e:
                         if e.errno != errno.EAGAIN:
                             raise e
@@ -707,6 +704,23 @@ class Chat:
         except KeyboardInterrupt:
             self.irc.close()
 
+def handle_twitch_chat_message(chat, m):
+    if m.command == "PING":
+        chat.send_line(f"PONG {m.trailing}")
+        return
+
+    if m.command != "PRIVMSG":
+        return
+
+    d = datetime.fromtimestamp(int(m.tags["tmi-sent-ts"])/1000)
+    d = d.isoformat(timespec='seconds')
+    u = m.tags["display-name"]
+
+    if len(chat.channels) > 1:
+        print(f"{d} {m.params[0]} {u}: {m.trailing}")
+    else:
+        print(f"{d} {u}: {m.trailing}")
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--manage", action="store_true")
@@ -719,7 +733,7 @@ if __name__ == "__main__":
         args = parse_args(args)
 
     if args.chat:
-        Chat(*args.channels).run()
+        Chat(*args.channels).run(handle_twitch_chat_message)
         sys.exit(0)
 
     c = Client(scope="")
