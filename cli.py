@@ -17,6 +17,7 @@ import ssl
 import select
 import errno
 import asyncio
+import logging
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -74,6 +75,25 @@ def render_duration(secs):
         s += f"{secs}s"
 
     return s
+
+# logging
+
+logger = None
+def setup_logger(level):
+    l = logging.getLogger('twitch-cli')
+    l.setLevel(level)
+
+    ch = logging.StreamHandler()
+    ch.setLevel(level)
+
+    f = logging.Formatter(
+        fmt='%(asctime)s:%(name)s:%(levelname)s %(message)s',
+        datefmt='%Y-%m-%dT%H:%M:%S%z')
+    ch.setFormatter(f)
+
+    l.addHandler(ch)
+
+    return l
 
 # auth
 
@@ -199,6 +219,15 @@ class Client:
             r.raise_for_status()
             j = r.json()
             self._me = User(self, user_name=j["login"], user_id=j["user_id"])
+            self.scopes = j["scopes"]
+
+            logger.info(f"authenticated as {self._me.user_name} ({self._me.user_id}) with scopes: {' '.join(self.scopes)}")
+            exp = j["expires_in"]
+            if exp / 3600 < 24:
+                logger.warning(f"access token expries soon: {render_duration(exp)}")
+            else:
+                logger.debug(f"access token expries in {render_duration(exp)}")
+
         return self._me
 
     def put(self, url, body, kraken=False):
@@ -600,22 +629,22 @@ class IRCMessage:
             i = s.index(' ')
             return s[1:i], s[i:]
         else:
-            return s
+            return None, s
 
     def __parse_command(s):
-        m = re.match("([ ]+)(\w+)|(\d\d\d) ", s)
-        cmd = m.group(2)
-        return cmd, s[len(m.group(1)) + len(cmd):]
+        m = re.match("[ ]*(\w+)|(\d\d\d)", s)
+        cmd = m.group(1)
+        return cmd, s[len(m.group(0)):]
 
     def __parse_params(s, acc):
-        if re.fullmatch("[ ]*", s):
+        if s == "" or re.fullmatch("[ ]+", s):
             return acc, None
 
-        m = re.fullmatch("[ ]*:(.*)", s)
+        m = re.fullmatch("[ ]+:(.*)", s)
         if m:
             return acc, m.group(1)
         else:
-            m = re.match("[ ]*([^ :][^ ]*)(.*)", s)
+            m = re.match("[ ]+([^ :][^ ]*)(.*)", s)
             if m is None:
                 raise ValueError(f"<params> don't match: {s}")
             middle = m.group(1)
@@ -636,50 +665,59 @@ class IRCMessage:
         return IRCMessage.__parse_tag(s[m.end(0):], acc)
 
 class Chat:
-    def __init__(self, *channels):
-        self.client = Client(scope="chat:read")
+    def __init__(self, client, channels, callback, reader, writer):
+        self.client = client or Client(scope="chat:read")
+        self.callback = callback
+        self.reader = reader
+        self.writer = writer
+        self.queue = asyncio.Queue()
 
         if len(channels) == 0:
-            self.channels = [self.client.me.user_name]
+            self.channels = [ self.client.me.user_name ]
         else:
             self.channels = [ u.user_name for u in self.client.user(*channels) ]
 
-    async def run(self, callback):
-        q = asyncio.Queue()
+    async def send_line(self, line):
+        await self.queue.put(bytes(line + "\r\n", "UTF-8"))
 
-        async def send_line(line):
-            q.put_nowait(bytes(line + "\r\n", "UTF-8"))
+    async def _read(self):
+        bs = await self.reader.readuntil(separator=b'\r\n')
+        bs = bs[:-2]
+        logger.debug(f"received IRC message: {bs}")
+        await self.callback(self, IRCMessage(bs))
+        await self._read()
 
-        await send_line(f"PASS oauth:{self.client.token}")
-        await send_line(f"NICK {self.client.me.user_name}")
-        await send_line("CAP REQ :twitch.tv/membership")
-        await send_line("CAP REQ :twitch.tv/commands")
-        await send_line("CAP REQ :twitch.tv/tags")
+    async def _write(self):
+        bs = await self.queue.get()
+        self.writer.write(bs)
+        self.queue.task_done()
+        logger.debug(f"sending IRC message: {bs}")
+        await self._write()
 
-        for c in self.channels:
-            await send_line(f"JOIN #{c}")
-
+    @staticmethod
+    async def run(callback, *channels, client=None):
         r, w = await asyncio.open_connection(
             host = irc_addr[0], port = irc_addr[1],
             family = socket.AF_INET,
             ssl = True
         )
 
-        async def do_read():
-            bs = await r.readuntil(separator=b'\r\n')
-            await callback(self, IRCMessage(bs), send_line)
-            await do_read()
+        ctx = Chat(callback=callback, channels=channels, client=client, reader=r, writer=w)
 
-        async def do_write():
-            w.write(await q.get())
-            q.task_done()
-            await do_write()
+        await ctx.send_line(f"PASS oauth:{ctx.client.token}")
+        await ctx.send_line(f"NICK {ctx.client.me.user_name}")
+        await ctx.send_line("CAP REQ :twitch.tv/membership")
+        await ctx.send_line("CAP REQ :twitch.tv/commands")
+        await ctx.send_line("CAP REQ :twitch.tv/tags")
 
-        await asyncio.gather(do_read(), do_write())
+        for c in ctx.channels:
+            await ctx.send_line(f"JOIN #{c}")
 
-async def handle_twitch_chat_message(chat, msg, send_line):
+        await asyncio.gather(ctx._read(), ctx._write())
+
+async def handle_twitch_chat_message(chat, msg):
     if msg.command == "PING":
-        chat.send_line(f"PONG {msg.trailing}")
+        await chat.send_line(f"PONG {msg.trailing}")
         return
 
     if msg.command != "PRIVMSG":
@@ -697,7 +735,10 @@ async def handle_twitch_chat_message(chat, msg, send_line):
 if __name__ == "__main__":
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--manage", action="store_true")
+    p.add_argument("--log", default="WARN")
     (a, args) = p.parse_known_args()
+
+    logger = setup_logger(a.log.upper())
 
     if a.manage:
         run_manager(parse_manager_args(args))
@@ -706,7 +747,7 @@ if __name__ == "__main__":
         args = parse_args(args)
 
     if args.chat:
-        asyncio.run(Chat(*args.channels).run(handle_twitch_chat_message))
+        asyncio.run(Chat.run(handle_twitch_chat_message, *args.channels))
         sys.exit(0)
 
     c = Client(scope="")
