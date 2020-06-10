@@ -9,6 +9,7 @@ import time
 import concurrent.futures
 import subprocess
 import sys
+import re
 import argparse
 
 from datetime import datetime, timedelta, timezone
@@ -25,8 +26,48 @@ redirect_uri = f"http://{redirect_host}:{redirect_port}{redirect_path}"
 helix_url = "https://api.twitch.tv/helix"
 oauth2_url = "https://id.twitch.tv/oauth2"
 
+# utils
+
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
+
+def parse_duration(string):
+    p = re.compile("([0-9]+)([dDhHmMsS])")
+    secs = 0
+    for m in p.finditer(string):
+        n = int(m.group(1))
+        t = m.group(2)
+        if t == "s" or t == "S":
+            secs += n
+        elif t == "m" or t == "M":
+            secs += n * 60
+        elif t == "h" or t == "H":
+            secs += n * 60 * 60
+        elif t == "d" or t == "D":
+            secs += n * 60 * 60 * 24
+    return secs
+
+def render_duration(secs):
+    s = ""
+
+    if secs >= 60 * 60 * 24:
+        s += f"{secs // (60 * 60 * 24)}d"
+        secs %= 60 * 60 * 24
+
+    if secs >= 60 * 60:
+        s += f"{secs // (60 * 60)}h"
+        secs %= 60 * 60
+
+    if secs >= 60:
+        s += f"{secs // 60}m"
+        secs %= 60
+
+    if secs > 0:
+        s += f"{secs}s"
+
+    return s
+
+# auth
 
 def new_token(scope):
     state = str(uuid.uuid4())
@@ -130,6 +171,8 @@ def get_token(scope):
 
     return s["tokens"][scope]
 
+# the client
+
 class Client:
     def __init__(self, token=None, scope=None):
         if token is not None:
@@ -173,7 +216,7 @@ class Client:
             while True:
                 j = self.get(f"{helix_url}/streams", params=p)
                 for i in j["data"]:
-                    ss.append(Stream.from_json(self, i))
+                    ss.append(Stream.from_twitch_json(self, i))
                 if "cursor" not in j["pagination"]: break
                 p["after"] = j["pagination"]["cursor"]
             users = users[100:]
@@ -191,7 +234,7 @@ class Client:
             p = { "login": names[:100] }
             j = self.get(f"{helix_url}/users", params=p)
             for i in j["data"]:
-                us.append(User.from_json(self, i))
+                us.append(User.from_twitch_json(self, i))
             names = names[100:]
 
         return us
@@ -208,7 +251,7 @@ class User:
     def __repr__(self):
         return f"{self.user_name} ({self.user_id})"
 
-    def from_json(client, j):
+    def from_twitch_json(client, j):
         if "login" in j:
             return User(client, user_id=j["id"], user_name=j["login"])
         else:
@@ -234,7 +277,7 @@ class User:
         while True:
             j = self.client.get(f"{helix_url}/videos", params=p)
             for i in j["data"]:
-                v = Video.from_json(self, i)
+                v = Video.from_twitch_json(self, i)
                 if since is not None and v.created_at < since:
                     return vs
                 vs.append(v)
@@ -262,7 +305,7 @@ class Video:
     def __repr__(self):
         return f"{self.user.user_name}: {self.title} ({self.video_id})"
 
-    def from_json(client, j):
+    def from_twitch_json(client, j):
         if "created_at" in j and j["created_at"] is not None:
             created_at = dateutil.parser.isoparse(j["created_at"])
         else:
@@ -277,12 +320,26 @@ class Video:
             video_id=j["id"],
             title=j["title"],
             url=j["url"],
-            user=User.from_json(client, j),
+            user=User.from_twitch_json(client, j),
             created_at=created_at,
             published_at=published_at,
-            duration=j["duration"],
+            duration=parse_duration(j["duration"]),
             typ=j["type"],
         )
+
+    def to_dict(self):
+        return {
+            "video_id": self.video_id,
+            "user_id": self.user.user_id,
+            "user_name": self.user.user_name,
+            "created_at": self.created_at.isoformat(),
+            "published_at": self.published_at.isoformat(),
+            "title": self.title,
+            "url": self.url,
+            "type": self.typ,
+            "duration": self.duration,
+            "duration_human": render_duration(self.duration),
+        }
 
 class Stream:
     def __init__(self, client, user, title):
@@ -300,13 +357,16 @@ class Stream:
     def url(self):
         return f"https://twitch.tv/{self.user.user_name}"
 
-    def from_json(client, j):
+    def from_twitch_json(client, j):
         return Stream(client,
             title=j["title"],
-            user=User.from_json(client, j),
+            user=User.from_twitch_json(client, j),
         )
 
 def tabularize(rows, pad=" ", sep=" "):
+    if len(rows) == 0:
+        return []
+
     s = [0] * max([len(r) for r in rows])
     for r in rows:
         for i, c in enumerate(r):
@@ -346,6 +406,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Twitch command line interface')
     parser.add_argument("--following", help="print channels you're following", action="store_true")
     parser.add_argument("--menu", help="run dmenu", action="store_true")
+    parser.add_argument("--json", help="output json", action="store_true")
     parser.add_argument("--menu-lines", type=int, default=20, help="number of maximum lines in the menu")
     parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
     parser.add_argument('channels', metavar='CHANNEL', nargs='*',
@@ -363,7 +424,10 @@ if __name__ == "__main__":
         if args.menu:
             for c in dmenu([f.user_name for f in fs], lines=args.menu_lines): print(c)
         else:
-            for f in fs: print(f.user_name)
+            if args.json:
+                for f in fs: print('"' + f.user_name + '"')
+            else:
+                for f in fs: print(f.user_name)
         sys.exit(0)
 
     if len(args.channels) > 0:
@@ -379,6 +443,10 @@ if __name__ == "__main__":
             vs += f.result()
     vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
 
+    if args.json:
+        for v in vs: print(json.dumps(v.to_dict()))
+        sys.exit(0)
+
     def clean_title(t):
         t = t.replace('\n', ' ')
         t = t.encode("ascii", "ignore")
@@ -388,7 +456,7 @@ if __name__ == "__main__":
     for s in c.streams(fs):
         choices.append(((s.user.user_name, "", "", clean_title(s.title)), s.url))
     for v in vs:
-        choices.append(((v.user.user_name, v.duration, v.typ[0], clean_title(v.title)), v.url))
+        choices.append(((v.user.user_name, render_duration(v.duration), v.typ[0], clean_title(v.title)), v.url))
 
     if args.menu:
         for c in dmenu(choices, lines=args.menu_lines): print(c)
