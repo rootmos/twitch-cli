@@ -12,6 +12,8 @@ cat <<EOF > "$OUT"
 * list videos and active streams of channels
 * [dmenu](https://tools.suckless.org/dmenu/) integration to select channels,
   videos or streams
+* manage stream metadata: title, category
+* read chat
 
 ## Example
 The menu option makes for a simple Twitch GUI when paired
