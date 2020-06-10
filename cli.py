@@ -12,6 +12,9 @@ import sys
 import re
 import argparse
 import tempfile
+import socket
+import select
+import errno
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -27,6 +30,7 @@ redirect_uri = f"http://{redirect_host}:{redirect_port}{redirect_path}"
 helix_url = "https://api.twitch.tv/helix"
 kraken_url = "https://api.twitch.tv/kraken"
 oauth2_url = "https://id.twitch.tv/oauth2"
+irc_addr = ("irc.chat.twitch.tv", 6667)
 
 # utils
 
@@ -570,7 +574,80 @@ def run_manager(args):
             for k, v in d.items():
                 print(f"{k}: {v}")
 
+class Chat:
+    def __init__(self, *channels):
+        # TODO: ssl
+        self.irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.irc.connect(irc_addr)
+
+        self.client = Client(scope="chat:read")
+
+        self.input = bytes()
+        self.output = bytes()
+
+        self.send_line(f"PASS oauth:{self.client.token}")
+        self.send_line(f"NICK {self.client.me.user_name}")
+        self.send_line("CAP REQ :twitch.tv/membership")
+        self.send_line("CAP REQ :twitch.tv/commands")
+        self.send_line("CAP REQ :twitch.tv/tags")
+
+        for c in channels:
+            print("joining: " + c)
+            self.send_line(f"JOIN #{c}")
+
+    def send_line(self, line):
+        self.input += bytes(line + "\n", "UTF-8")
+
+    def emit_line(self, line):
+        print(line)
+
+    def handle_output(self, bs=None):
+        if bs is not None:
+            self.output += bs
+
+        for i, b in enumerate(self.output):
+            if b == 13 and i + 1 < len(self.output) and self.output[i+1] == 10:
+                self.emit_line(self.output[:i])
+                self.output = self.output[i+2:]
+                return self.handle_output(None)
+
+    def run(self):
+        try:
+            self.irc.setblocking(False)
+            running = True
+            while running:
+                ws = [self.irc] if len(self.input) > 0 else []
+                rs, ws, es = select.select([self.irc],ws,[self.irc],1000)
+                for r in rs:
+                    try:
+                        while True:
+                            bs = r.recv(4096)
+                            if len(bs) == 0:
+                                running = False
+                            self.handle_output(bs)
+                    except socket.error as e:
+                        if e.errno != errno.EAGAIN:
+                            raise e
+
+                for w in ws:
+                    try:
+                        while len(self.input) > 0:
+                            n = w.send(self.input)
+                            self.input = self.input[n:]
+                    except socket.error as e:
+                        if e.errno != errno.EAGAIN:
+                            raise e
+
+                for e in es:
+                    raise RuntimeError("error on socket")
+
+        except KeyboardInterrupt:
+            self.irc.close()
+
 if __name__ == "__main__":
+    Chat(*sys.argv[1:]).run()
+    sys.exit(0)
+
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--manage", action="store_true")
     (a, args) = p.parse_known_args()
