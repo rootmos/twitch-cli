@@ -190,6 +190,24 @@ class Client:
         j = r.json()
         return User(self, user_name=j["login"], user_id=j["user_id"])
 
+    def put(self, url, body, kraken=False):
+        if kraken:
+            url = kraken_url + url
+            h = {
+                "Authorization": f"OAuth {self.token}",
+                "Client-ID": client_id,
+                "Accept": "application/vnd.twitchtv.v5+json",
+            }
+        else:
+            url = helix_url + url
+            h = {
+                "Authorization": f"Bearer {self.token}",
+                "Client-ID": client_id,
+            }
+
+        r = requests.put(url, json=body, headers=h)
+        r.raise_for_status()
+
     def get(self, url, params=None, kraken=False):
         if kraken:
             url = kraken_url + url
@@ -310,8 +328,22 @@ class User:
 
 class Channel:
     def __init__(self, client, channel_id, status):
+        self.client = client
         self.channel_id = channel_id
-        self.status = status
+        self._status = status
+
+    @property
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, v):
+        self.client.put(
+            f"/channels/{self.channel_id}",
+            body={"channel[status]": v},
+            kraken=True,
+        )
+        self._status = v
 
     @staticmethod
     def from_twitch_json(client, j):
@@ -450,11 +482,16 @@ def parse_args(args):
 def parse_manager_args(args):
     parser = argparse.ArgumentParser(sys.argv[0] + " --manage", description='Twitch stream manager command line interface')
     parser.add_argument("--title", action="store_true", help="get title")
+    parser.add_argument("--set-title", metavar="TITLE", help="set stream title")
     return parser.parse_args(args)
 
 def run_manager(args):
-    c = Client(scope="")
+    c = None
+    if args.set_title is not None:
+        c = c or Client(scope="channel_editor")
+        c.me().channel.status = args.set_title
 
+    c = c or Client(scope="")
     if args.title:
         print(c.me().channel.status)
 
