@@ -508,6 +508,7 @@ def parse_args(args):
     parser.add_argument("--menu", help="run dmenu", action="store_true")
     parser.add_argument("--json", help="output json", action="store_true")
     parser.add_argument("--menu-lines", type=int, default=20, help="number of maximum lines in the menu")
+    parser.add_argument("--chat", action="store_true", help="interact with chat")
     parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
     parser.add_argument('channels', metavar='CHANNEL', nargs='*',
                         help='channel to act on (defaults to followed channels)')
@@ -650,8 +651,10 @@ class Chat:
         self.send_line("CAP REQ :twitch.tv/commands")
         self.send_line("CAP REQ :twitch.tv/tags")
 
+        if len(channels) == 0:
+            channels = [self.client.me.user_name]
+
         for c in channels:
-            print("joining: " + c)
             self.send_line(f"JOIN #{c}")
 
     def send_line(self, line):
@@ -705,9 +708,6 @@ class Chat:
             self.irc.close()
 
 if __name__ == "__main__":
-    Chat(*sys.argv[1:]).run()
-    sys.exit(0)
-
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--manage", action="store_true")
     (a, args) = p.parse_known_args()
@@ -717,6 +717,10 @@ if __name__ == "__main__":
         sys.exit(0)
     else:
         args = parse_args(args)
+
+    if args.chat:
+        Chat(*args.channels).run()
+        sys.exit(0)
 
     c = Client(scope="")
 
