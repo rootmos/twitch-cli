@@ -712,18 +712,18 @@ class Chat:
         await self.queue.put(bytes(line + "\r\n", "UTF-8"))
 
     async def _read(self):
-        bs = await self.reader.readuntil(separator=b'\r\n')
-        bs = bs[:-2]
-        logger.debug(f"received IRC message: {bs}")
-        await self.callback(self, IRCMessage(bs))
-        await self._read()
+        while True:
+            bs = await self.reader.readuntil(separator=b'\r\n')
+            bs = bs[:-2]
+            logger.debug(f"received IRC message: {bs}")
+            await self.callback(self, IRCMessage(bs))
 
     async def _write(self):
-        bs = await self.queue.get()
-        self.writer.write(bs)
-        self.queue.task_done()
-        logger.debug(f"sending IRC message: {bs}")
-        await self._write()
+        while True:
+            bs = await self.queue.get()
+            self.writer.write(bs)
+            self.queue.task_done()
+            logger.debug(f"sending IRC message: {bs}")
 
     @staticmethod
     async def run(callback, *channels, client=None):
