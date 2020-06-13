@@ -891,23 +891,37 @@ class Chat:
 
 
 import websockets
-async def activity_feed(client):
+async def activity_feed(client, *channels):
     base = "ws://ec2-3-127-249-247.eu-central-1.compute.amazonaws.com:8001"
-    url = f"{base}/sessions"
+    url = base + "/sessions"
+
+    us = client.user(*channels)
 
     async with websockets.connect(url) as ws:
         s = json.loads(await ws.recv())["session"]
-        topic = f"https://api.twitch.tv/helix/users/follows?first=1&to_id={client.me.user_id}"
-        c.webhook(
-            topic=topic,
-            callback=s["callback_urls"]["/users/follows"],
-            secret=s["secret_base64"]
-        )
 
-        print("waiting for events...")
+        for u in us:
+            c.webhook(
+                topic=f"https://api.twitch.tv/helix/users/follows?first=1&to_id={u.user_id}",
+                callback=s["callback_urls"]["/users/follows"],
+                secret=s["secret"]
+            )
+
+            c.webhook(
+                topic=f"https://api.twitch.tv/helix/streams?user_id={u.user_id}",
+                callback=s["callback_urls"]["/streams"],
+                secret=s["secret"]
+            )
+
         while True:
             e = json.loads(await ws.recv())
-            print(e)
+            if e["topic"] == "/users/follows":
+                ts = datetime.strptime(e["event"]["followed_at"], "%Y-%m-%dT%H:%M:%S%z").astimezone()
+                f = e["event"]["from_name"]
+                t = e["event"]["to_name"]
+                print(f"{ts.isoformat(timespec='seconds')} {f} followed {t}")
+            elif e["topic"] == "/stream":
+                print(e["event"])
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(add_help=False)
@@ -925,7 +939,7 @@ if __name__ == "__main__":
 
     if args.activity:
         c = Client(scope="")
-        asyncio.run(activity_feed(c))
+        asyncio.run(activity_feed(c, *args.channels))
         sys.exit(0)
 
     if args.chat:
