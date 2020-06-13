@@ -563,12 +563,17 @@ def dmenu(choices, lines=20):
     return vs
 
 def parse_args(args):
+    default_path = Path("~/.twitch-cli").expanduser()
+
     parser = argparse.ArgumentParser(description='Twitch command line interface')
     parser.add_argument("--following", help="print channels you're following", action="store_true")
     parser.add_argument("--menu", help="run dmenu", action="store_true")
     parser.add_argument("--json", help="output json", action="store_true")
     parser.add_argument("--menu-lines", type=int, default=20, help="number of maximum lines in the menu")
     parser.add_argument("--chat", action="store_true", help="interact with chat")
+    parser.add_argument("--chat-input-path", metavar="PATH", default=default_path/"channel",
+            help=f"create chat input channel at PATH/CHANNEL (default: ~/.twitch-cli/channel)")
+    parser.add_argument("--chat-read-only", action="store_true", default=False, help="lurker mode")
     parser.add_argument("--follow", metavar="CHANNEL", action="append", help="follow CHANNEL (may be used multiple times)")
     parser.add_argument("--unfollow", metavar="CHANNEL", action="append", help="unfollow CHANNEL (may be used multiple times)")
     parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
@@ -697,7 +702,7 @@ class IRCMessage:
 
 class Chat:
     def __init__(self, client, channels, callback, reader, writer):
-        self.client = client or Client(scope="chat:read")
+        self.client = client
         self.callback = callback
         self.reader = reader
         self.writer = writer
@@ -725,8 +730,26 @@ class Chat:
             self.queue.task_done()
             logger.debug(f"sending IRC message: {bs}")
 
+    async def _channel_input(self, channel, path, echo):
+        logger.debug(f"reading chat input to {channel} from: {path}")
+        async def go(r, w):
+            logger.debug(f"client connected to chat input for {channel}")
+            while True:
+                w.write(bytes(f"{self.client.me.user_name}@{channel} ", "UTF-8"))
+                l = await r.readline()
+                if len(l) == 0: break
+                if len(l) == 1: continue
+                l = str(l[:-1], "UTF-8")
+                logger.debug(f"sending chat line to {channel}: {l}")
+                await self.send_line(f"PRIVMSG #{channel} :{l}")
+                if echo is not None:
+                    await echo(self, datetime.now(), self.client.me.user_name, channel, l)
+            logger.debug(f"client disconnected for chat input to {channel}")
+
+        await asyncio.start_unix_server(go, path)
+
     @staticmethod
-    async def run(callback, *channels, client=None):
+    async def run(callback, client, input_path, read_only, channels, echo=None):
         r, w = await asyncio.open_connection(
             host = irc_addr[0], port = irc_addr[1],
             family = socket.AF_INET,
@@ -735,16 +758,28 @@ class Chat:
 
         ctx = Chat(callback=callback, channels=channels, client=client, reader=r, writer=w)
 
+        if not read_only:
+            os.makedirs(input_path, exist_ok=True)
+            inputs = [ ctx._channel_input(c, os.path.join(input_path, c), echo) for c in channels ]
+        else:
+            inputs = []
+
         await ctx.send_line(f"PASS oauth:{ctx.client.token}")
         await ctx.send_line(f"NICK {ctx.client.me.user_name}")
-        await ctx.send_line("CAP REQ :twitch.tv/membership")
-        await ctx.send_line("CAP REQ :twitch.tv/commands")
-        await ctx.send_line("CAP REQ :twitch.tv/tags")
+        await ctx.send_line("CAP REQ :twitch.tv/membership twitch.tv/commands twitch.tv/tags")
 
         for c in ctx.channels:
             await ctx.send_line(f"JOIN #{c}")
 
-        await asyncio.gather(ctx._read(), ctx._write())
+        await asyncio.gather(ctx._read(), ctx._write(), *inputs)
+
+async def handle_twitch_chat_echo(chat, timestamp, user, channel, msg):
+    d = timestamp.isoformat(timespec='seconds')
+
+    if len(chat.channels) > 1:
+        print(f"{d} {channel} {user}: {msg}")
+    else:
+        print(f"{d} {user}: {msg}")
 
 async def handle_twitch_chat_message(chat, msg):
     if msg.command == "PING":
@@ -778,7 +813,17 @@ if __name__ == "__main__":
         args = parse_args(args)
 
     if args.chat:
-        asyncio.run(Chat.run(handle_twitch_chat_message, *args.channels))
+        try:
+            asyncio.run(Chat.run(
+                callback = handle_twitch_chat_message,
+                client = Client(scope="chat:read") if args.chat_read_only else Client(scope="chat:read chat:edit"),
+                input_path = args.chat_input_path,
+                read_only = args.chat_read_only,
+                channels = args.channels,
+                echo = handle_twitch_chat_echo,
+                ))
+        except KeyboardInterrupt:
+            pass
         sys.exit(0)
 
     c = Client(scope="user_follows_edit")

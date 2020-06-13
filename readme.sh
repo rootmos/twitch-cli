@@ -15,7 +15,10 @@ cat <<EOF | tee "$OUT"
 * [dmenu](https://tools.suckless.org/dmenu/) integration to select channels,
   videos or streams
 * manage stream metadata: title, category
-* read chat
+* lurk in chat or interact using per channel unix sockets:
+  - \`twitch-cli --chat rootmos2\` in one terminal and
+    \`socat readline unix:~/.twitch-cli/channel/rootmos2\` in another
+    ([tmux](https://tmux.github.io/) sounds perfect for this, no?)
 
 ## Example
 The menu option makes for a simple Twitch GUI when paired

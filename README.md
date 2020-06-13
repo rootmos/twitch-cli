@@ -6,7 +6,10 @@
 * [dmenu](https://tools.suckless.org/dmenu/) integration to select channels,
   videos or streams
 * manage stream metadata: title, category
-* read chat
+* lurk in chat or interact using per channel unix sockets:
+  - `twitch-cli --chat rootmos2` in one terminal and
+    `socat readline ~/.twitch-cli/channel/rootmos2` in another
+    ([tmux](https://tmux.github.io/) sounds perfect for this, no?)
 
 ## Example
 The menu option makes for a simple Twitch GUI when paired
@@ -23,9 +26,9 @@ however it doesn't list videos (at the time of writing).
 ## Usage
 ```
 usage: twitch-cli [-h] [--following] [--menu] [--json]
-                  [--menu-lines MENU_LINES] [--chat] [--follow CHANNEL]
-                  [--unfollow CHANNEL] [--title-max-length TITLE_MAX_LENGTH]
-                  [--since SINCE]
+                  [--menu-lines MENU_LINES] [--chat] [--chat-input-path PATH]
+                  [--chat-read-only] [--follow CHANNEL] [--unfollow CHANNEL]
+                  [--title-max-length TITLE_MAX_LENGTH] [--since SINCE]
                   [CHANNEL [CHANNEL ...]]
 
 Twitch command line interface
@@ -41,6 +44,10 @@ optional arguments:
   --menu-lines MENU_LINES
                         number of maximum lines in the menu
   --chat                interact with chat
+  --chat-input-path PATH
+                        create chat input channel at PATH/CHANNEL (default:
+                        ~/.twitch-cli/channel)
+  --chat-read-only      lurker mode
   --follow CHANNEL      follow CHANNEL (may be used multiple times)
   --unfollow CHANNEL    unfollow CHANNEL (may be used multiple times)
   --title-max-length TITLE_MAX_LENGTH
