@@ -574,6 +574,7 @@ def parse_args(args):
     parser.add_argument("--chat-input-path", metavar="PATH", default=default_path/"channel",
             help=f"create chat input channel at PATH/CHANNEL (default: ~/.twitch-cli/channel)")
     parser.add_argument("--chat-read-only", action="store_true", default=False, help="lurker mode")
+    parser.add_argument("--chat-join-parts", action="store_true", default=False, help="display who joins and leaves the chat")
     parser.add_argument("--follow", metavar="CHANNEL", action="append", help="follow CHANNEL (may be used multiple times)")
     parser.add_argument("--unfollow", metavar="CHANNEL", action="append", help="unfollow CHANNEL (may be used multiple times)")
     parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
@@ -712,22 +713,15 @@ class Chat:
         else:
             self.channels = [ u.user_name for u in self.client.user(*channels) ]
 
+        self.rooms = {}
+        for c in self.channels:
+            self.rooms[f"#{c}"] = set()
+
+        self.rooms_update_lock = asyncio.Lock()
+        self.rooms_update_snapshot = None
+
     async def send_line(self, line):
         await self.queue.put(bytes(line + "\r\n", "UTF-8"))
-
-    async def _read(self):
-        while True:
-            bs = await self.reader.readuntil(separator=b'\r\n')
-            bs = bs[:-2]
-            logger.debug(f"received IRC message: {bs}")
-            await self._handle_message(IRCMessage(bs))
-
-    async def _write(self):
-        while True:
-            bs = await self.queue.get()
-            self.writer.write(bs)
-            self.queue.task_done()
-            logger.debug(f"sending IRC message: {bs}")
 
     async def _channel_input(self, channel, path, echo):
         logger.debug(f"reading chat input to {channel} from: {path}")
@@ -749,27 +743,85 @@ class Chat:
     async def _print_line(self, timestamp, user, channel, msg):
         d = timestamp.isoformat(timespec='seconds')
 
-        if len(self.channels) > 1:
-            print(f"{d} {channel} {user}: {msg}")
+        if user is None:
+            if len(self.channels) > 1:
+                print(f"{d} {channel} {msg}")
+            else:
+                print(f"{d} {msg}")
         else:
-            print(f"{d} {user}: {msg}")
-
-    async def _handle_message(chat, msg):
-        if msg.command == "PING":
-            await chat.send_line(f"PONG {msg.trailing}")
-            return
-
-        if msg.command != "PRIVMSG":
-            return
-
-        d = datetime.fromtimestamp(int(msg.tags["tmi-sent-ts"])/1000)
-        d = d.isoformat(timespec='seconds')
-        u = msg.tags["display-name"]
-
-        self._print_line(d, u, msg.params[0], msg.trailing)
+            if len(self.channels) > 1:
+                print(f"{d} {channel} {user}: {msg}")
+            else:
+                print(f"{d} {user}: {msg}")
 
     @staticmethod
-    async def run(client, input_path, read_only, channels):
+    def extract_user_name_from_prefix(p):
+        u = re.match("([-\\w]+)!([-\\w]+)@([-\\w]+).tmi.twitch.tv", p)
+        if u.group(1) == u.group(2) and u.group(2) == u.group(3):
+            return u.group(1)
+        raise ValueError(f"cannot extract user name from prefix: {p}")
+
+    async def _perform_room_update(self):
+        await asyncio.sleep(0.3)
+        diffs = {}
+        async with self.rooms_update_lock:
+            for c in self.rooms.keys():
+                j = set(self.rooms[c])
+                j -= self.rooms_update_snapshot[c]
+                l = set(self.rooms_update_snapshot[c])
+                l -= self.rooms[c]
+                diffs[c] = (j, l)
+
+            self.rooms_update_snapshot = None
+
+        for c, (j, l) in diffs.items():
+            if len(j) > 0:
+                await self._print_line(datetime.now(), None, c, "joined: " + " ".join(j))
+            if len(l) > 0:
+                await self._print_line(datetime.now(), None, c, "left: " + " ".join(l))
+
+    async def _handle_message(self, msg, join_parts=False):
+        if msg.command == "PING":
+            await self.send_line(f"PONG {msg.trailing}")
+            return
+
+        if msg.command == "JOIN" or msg.command == "PART":
+            u = Chat.extract_user_name_from_prefix(msg.prefix)
+            async with self.rooms_update_lock:
+                if join_parts:
+                    if self.rooms_update_snapshot is None:
+                        self.rooms_update_snapshot = {}
+                        for c in self.rooms.keys():
+                            self.rooms_update_snapshot[c] = set(self.rooms[c])
+                        asyncio.create_task(self._perform_room_update())
+                if msg.command == "JOIN":
+                    self.rooms[msg.params[0]].add(u)
+                elif msg.command == "PART":
+                    self.rooms[msg.params[0]].remove(u)
+        elif msg.command == "353":
+            for u in msg.trailing.split():
+                self.rooms[msg.params[2]].add(u)
+        elif msg.command == "366":
+            pass
+        elif msg.command == "PRIVMSG":
+            d = datetime.fromtimestamp(int(msg.tags["tmi-sent-ts"])/1000)
+            u = msg.tags["display-name"]
+            await self._print_line(d, u, msg.params[0], msg.trailing)
+        elif msg.command == "USERSTATE":
+            pass
+        elif msg.command == "ROOMSTATE":
+            pass
+        elif msg.command == "CAP":
+            pass
+        elif msg.command == "001" or msg.command == "002" or msg.command == "003" or msg.command == "004":
+            pass
+        elif msg.command == "375" or msg.command == "372" or msg.command == "376":
+            pass
+        else:
+            logger.debug(f"unhandled command: {msg.command}")
+
+    @staticmethod
+    async def run(client, input_path, read_only, join_parts, channels):
         r, w = await asyncio.open_connection(
             host = irc_addr[0], port = irc_addr[1],
             family = socket.AF_INET,
@@ -791,7 +843,21 @@ class Chat:
         for c in ctx.channels:
             await ctx.send_line(f"JOIN #{c}")
 
-        await asyncio.gather(ctx._read(), ctx._write(), *inputs)
+        async def _read():
+            while True:
+                bs = await ctx.reader.readuntil(separator=b'\r\n')
+                bs = bs[:-2]
+                logger.debug(f"received IRC message: {bs}")
+                await ctx._handle_message(IRCMessage(bs), join_parts=join_parts)
+
+        async def _write():
+            while True:
+                bs = await ctx.queue.get()
+                ctx.writer.write(bs)
+                ctx.queue.task_done()
+                logger.debug(f"sending IRC message: {bs}")
+
+        await asyncio.gather(_read(), _write(), *inputs)
 
 
 if __name__ == "__main__":
@@ -814,6 +880,7 @@ if __name__ == "__main__":
                 client = Client(scope="chat:read") if args.chat_read_only else Client(scope="chat:read chat:edit"),
                 input_path = args.chat_input_path,
                 read_only = args.chat_read_only,
+                join_parts = args.chat_join_parts,
                 channels = args.channels,
                 ))
         except KeyboardInterrupt:
