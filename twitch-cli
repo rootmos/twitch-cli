@@ -701,9 +701,8 @@ class IRCMessage:
         return IRCMessage.__parse_tag(s[m.end(0):], acc)
 
 class Chat:
-    def __init__(self, client, channels, callback, reader, writer):
+    def __init__(self, client, channels, reader, writer):
         self.client = client
-        self.callback = callback
         self.reader = reader
         self.writer = writer
         self.queue = asyncio.Queue()
@@ -721,7 +720,7 @@ class Chat:
             bs = await self.reader.readuntil(separator=b'\r\n')
             bs = bs[:-2]
             logger.debug(f"received IRC message: {bs}")
-            await self.callback(self, IRCMessage(bs))
+            await self._handle_message(IRCMessage(bs))
 
     async def _write(self):
         while True:
@@ -742,25 +741,46 @@ class Chat:
                 l = str(l[:-1], "UTF-8")
                 logger.debug(f"sending chat line to {channel}: {l}")
                 await self.send_line(f"PRIVMSG #{channel} :{l}")
-                if echo is not None:
-                    await echo(self, datetime.now(), self.client.me.user_name, channel, l)
+                await self._print_line(datetime.now(), self.client.me.user_name, channel, l)
             logger.debug(f"client disconnected for chat input to {channel}")
 
         await asyncio.start_unix_server(go, path)
 
+    async def _print_line(self, timestamp, user, channel, msg):
+        d = timestamp.isoformat(timespec='seconds')
+
+        if len(self.channels) > 1:
+            print(f"{d} {channel} {user}: {msg}")
+        else:
+            print(f"{d} {user}: {msg}")
+
+    async def _handle_message(chat, msg):
+        if msg.command == "PING":
+            await chat.send_line(f"PONG {msg.trailing}")
+            return
+
+        if msg.command != "PRIVMSG":
+            return
+
+        d = datetime.fromtimestamp(int(msg.tags["tmi-sent-ts"])/1000)
+        d = d.isoformat(timespec='seconds')
+        u = msg.tags["display-name"]
+
+        self._print_line(d, u, msg.params[0], msg.trailing)
+
     @staticmethod
-    async def run(callback, client, input_path, read_only, channels, echo=None):
+    async def run(client, input_path, read_only, channels):
         r, w = await asyncio.open_connection(
             host = irc_addr[0], port = irc_addr[1],
             family = socket.AF_INET,
             ssl = True
         )
 
-        ctx = Chat(callback=callback, channels=channels, client=client, reader=r, writer=w)
+        ctx = Chat(channels=channels, client=client, reader=r, writer=w)
 
         if not read_only:
             os.makedirs(input_path, exist_ok=True)
-            inputs = [ ctx._channel_input(c, os.path.join(input_path, c), echo) for c in channels ]
+            inputs = [ ctx._channel_input(c, os.path.join(input_path, c)) for c in channels ]
         else:
             inputs = []
 
@@ -773,30 +793,6 @@ class Chat:
 
         await asyncio.gather(ctx._read(), ctx._write(), *inputs)
 
-async def handle_twitch_chat_echo(chat, timestamp, user, channel, msg):
-    d = timestamp.isoformat(timespec='seconds')
-
-    if len(chat.channels) > 1:
-        print(f"{d} {channel} {user}: {msg}")
-    else:
-        print(f"{d} {user}: {msg}")
-
-async def handle_twitch_chat_message(chat, msg):
-    if msg.command == "PING":
-        await chat.send_line(f"PONG {msg.trailing}")
-        return
-
-    if msg.command != "PRIVMSG":
-        return
-
-    d = datetime.fromtimestamp(int(msg.tags["tmi-sent-ts"])/1000)
-    d = d.isoformat(timespec='seconds')
-    u = msg.tags["display-name"]
-
-    if len(chat.channels) > 1:
-        print(f"{d} {msg.params[0]} {u}: {msg.trailing}")
-    else:
-        print(f"{d} {u}: {msg.trailing}")
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(add_help=False)
@@ -815,12 +811,10 @@ if __name__ == "__main__":
     if args.chat:
         try:
             asyncio.run(Chat.run(
-                callback = handle_twitch_chat_message,
                 client = Client(scope="chat:read") if args.chat_read_only else Client(scope="chat:read chat:edit"),
                 input_path = args.chat_input_path,
                 read_only = args.chat_read_only,
                 channels = args.channels,
-                echo = handle_twitch_chat_echo,
                 ))
         except KeyboardInterrupt:
             pass
