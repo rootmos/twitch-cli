@@ -3,8 +3,10 @@
 set -o nounset -o pipefail -o errexit
 
 OUT=README.md
+TARGET=twitch-cli
+PATH=.:$PATH
 
-cat <<EOF > "$OUT"
+cat <<EOF | tee "$OUT"
 # [Twitch](https://twitch.tv) command line interface
 
 ## Features
@@ -20,7 +22,7 @@ The menu option makes for a simple Twitch GUI when paired
 with a media player that support Twitch URLs
 (I recommend [mpv](https://mpv.io/) and [youtube-dl](https://youtube-dl.org/)).
 \`\`\`shell
-./cli.py --menu | xargs mpv
+$TARGET --menu | xargs mpv
 \`\`\`
 
 For a more sophisticated/klickety-klick GUI check out:
@@ -30,15 +32,15 @@ however it doesn't list videos (at the time of writing).
 ## Usage
 \`\`\`
 EOF
-./cli.py -h >> "$OUT" 2>&1
+$TARGET -h 2>&1 | tee -a "$OUT"
 
-cat <<EOF >> "$OUT"
+cat <<EOF | tee -a "$OUT"
 \`\`\`
 ### Stream manager
 \`\`\`
 EOF
-./cli.py --manage -h >> "$OUT" 2>&1
+$TARGET --manage -h 2>&1 | tee -a "$OUT"
 
-cat <<EOF >> "$OUT"
+cat <<EOF | tee -a "$OUT"
 \`\`\`
 EOF

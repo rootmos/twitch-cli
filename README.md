@@ -13,7 +13,7 @@ The menu option makes for a simple Twitch GUI when paired
 with a media player that support Twitch URLs
 (I recommend [mpv](https://mpv.io/) and [youtube-dl](https://youtube-dl.org/)).
 ```shell
-./cli.py --menu | xargs mpv
+twitch-cli --menu | xargs mpv
 ```
 
 For a more sophisticated/klickety-klick GUI check out:
@@ -22,10 +22,11 @@ however it doesn't list videos (at the time of writing).
 
 ## Usage
 ```
-usage: cli.py [-h] [--following] [--menu] [--json] [--menu-lines MENU_LINES]
-              [--chat] [--follow CHANNEL] [--unfollow CHANNEL]
-              [--title-max-length TITLE_MAX_LENGTH] [--since SINCE]
-              [CHANNEL [CHANNEL ...]]
+usage: twitch-cli [-h] [--following] [--menu] [--json]
+                  [--menu-lines MENU_LINES] [--chat] [--follow CHANNEL]
+                  [--unfollow CHANNEL] [--title-max-length TITLE_MAX_LENGTH]
+                  [--since SINCE]
+                  [CHANNEL [CHANNEL ...]]
 
 Twitch command line interface
 
@@ -48,8 +49,8 @@ optional arguments:
 ```
 ### Stream manager
 ```
-usage: ./cli.py --manage [-h] [--title] [--set-title TITLE] [--edit-title]
-                         [--category] [--set-category CATEGORY] [--json]
+usage: twitch-cli --manage [-h] [--title] [--set-title TITLE] [--edit-title]
+                           [--category] [--set-category CATEGORY] [--json]
 
 Twitch stream manager command line interface
 

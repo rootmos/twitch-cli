@@ -578,7 +578,7 @@ def parse_args(args):
     return parser.parse_args(args)
 
 def parse_manager_args(args):
-    parser = argparse.ArgumentParser(sys.argv[0] + " --manage", description='Twitch stream manager command line interface')
+    parser = argparse.ArgumentParser(os.path.basename(sys.argv[0]) + " --manage", description='Twitch stream manager command line interface')
     parser.add_argument("--title", action="store_true", help="print stream title")
     parser.add_argument("--set-title", metavar="TITLE", help="set stream title")
     parser.add_argument("--edit-title", action="store_true", help="edit stream title using $EDITOR")
