@@ -33,9 +33,8 @@ class Subscription:
         self.subscription_id = subscription_id
         self.session = session
         self.topic = topic
-        self.expires_at = None
-        self.lease_seconds = None
         self.created_at = datetime.now(timezone.utc)
+        self.expires_at = None
         self.verified_at = None
         self.secret = secret
         self.callback_url = session.base_url + f"/subscriptions/{self.subscription_id}"
@@ -62,10 +61,14 @@ class Subscription:
             if secs > 0: await asyncio.sleep(secs)
 
             async with self._lock:
-                logger.warning(f"subscription timeout in state: state={self.state.name} session_id={self.session.session_id} subscription_id={self.subscription_id}")
+                if secs > 0:
+                    logger.warning(f"subscription timeout: state={self.state.name} session_id={self.session.session_id} subscription_id={self.subscription_id}")
+                else:
+                    logger.warning(f"removing stale subscription: state={self.state.name} session_id={self.session.session_id} subscription_id={self.subscription_id}")
+
                 self.state = Subscription.State.TIMEDOUT
                 await self.session.remove_subscription(self)
-                await self.session.events.put({"subscription": sub.to_dict()})
+                await self.session.events.put({"subscription": self.to_dict()})
 
         self.state = next_state
         self._state_timeout = asyncio.ensure_future(go())
@@ -85,10 +88,9 @@ class Subscription:
 
     async def verify(self, lease_seconds, topic):
         async with self._lock:
-            if self.state != Subscription.State.UNVERIFIED:
+            if self.state != Subscription.State.UNVERIFIED and self.state != Subscription.State.VERIFIED:
                 raise RuntimeError(f"verifying in unexpected state: {self.state}")
 
-            self.lease_seconds = lease_seconds
             self.verified_at = datetime.now(timezone.utc)
             self.expires_at = self.verified_at + timedelta(seconds=lease_seconds)
             self.topic = topic
@@ -98,7 +100,7 @@ class Subscription:
 
     async def denied(self, reason):
         async with self._lock:
-            if self.state != Subscription.State.UNVERIFIED:
+            if self.state != Subscription.State.UNVERIFIED and self.state != Subscription.State.VERIFIED:
                 raise RuntimeError(f"subscription denied while in unexpected state: {self.state}")
 
             self._transition(Subscription.State.DENIED)

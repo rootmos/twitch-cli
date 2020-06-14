@@ -355,12 +355,12 @@ class Client:
             self.delete(f"/users/{self.me.user_id}/follows/channels/{u.user_id}", kraken=True)
             logger.info(f"unfollowed {u.user_name} ({u.user_id})")
 
-    def webhook(self, topic, callback, secret):
+    def webhook(self, topic, callback, secret, lease_seconds=180):
         body = {
             "hub.topic": topic,
             "hub.callback": callback,
             "hub.mode": "subscribe",
-            "hub.lease_seconds": 5*3600,
+            "hub.lease_seconds": lease_seconds,
             "hub.secret": secret,
         }
 
@@ -918,13 +918,25 @@ async def activity_feed(client, *channels):
 
             if "subscription" in e:
                 sub = e["subscription"]
-                state = sub["state"]
-                topic = sub['topic']
+                state, topic, callback, secret = sub["state"], sub["topic"], sub["callback_url"], sub["secret"]
                 if state == "UNVERIFIED":
-                    logger.debug(f"verifying topic: topic={topic} callback={sub['callback_url']}")
-                    c.webhook(topic=topic, callback=sub["callback_url"], secret=sub["secret"])
+                    logger.debug(f"verifying topic: topic={topic} callback={callback}")
+                    c.webhook(topic=topic, callback=callback, secret=secret)
                 elif state == "VERIFIED":
                     logger.debug(f"verified topic: {topic}")
+
+                    async def resub(delay, topic, callback, secret):
+                        if delay > 0:
+                            logger.debug(f"resubscription timer: seconds={delay} topic={topic}")
+                            await asyncio.sleep(delay)
+                        logger.debug(f"resubscribing: topic={topic}")
+                        c.webhook(topic=topic, callback=callback, secret=secret)
+
+                    eat = datetime.fromisoformat(sub["expires_at"])
+                    vat = datetime.fromisoformat(sub["verified_at"])
+                    now = datetime.now(timezone.utc)
+                    delay = ((vat + (eat-vat)*0.75) - now).total_seconds()
+                    asyncio.ensure_future(resub(delay, topic, callback, secret))
                 elif state == "DENIED":
                     logger.debug(f"denied subscription: topic={topic} reason={sub['reason']}")
                 elif state == "TIMEDOUT":
@@ -940,7 +952,7 @@ async def activity_feed(client, *channels):
                     t = payload["to_name"]
                     print(f"{ts.isoformat(timespec='seconds')} {f} followed {t}")
                 else:
-                    logger.warn("unhandled event: {e}")
+                    logger.warn(f"unhandled event: {e}")
             else:
                 logger.warn(f"unexpected message: {e}")
 
