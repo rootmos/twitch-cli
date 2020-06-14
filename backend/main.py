@@ -27,6 +27,7 @@ class Subscription:
         UNVERIFIED = 1
         VERIFIED = 2
         DENIED = 3
+        TIMEDOUT = 4
 
     def __init__(self, subscription_id, session, topic, secret):
         self.subscription_id = subscription_id
@@ -37,11 +38,37 @@ class Subscription:
         self.created_at = datetime.now(timezone.utc)
         self.verified_at = None
         self.secret = secret
-        self.state = Subscription.State.UNVERIFIED
         self.callback_url = session.base_url + f"/subscriptions/{self.subscription_id}"
 
-        self.lock = asyncio.Lock()
-        # TODO: self.state_timeout
+        self._lock = asyncio.Lock()
+        self.state = None
+        self._state_timeout = None
+        self._transition(Subscription.State.UNVERIFIED)
+
+    def _transition(self, next_state):
+        if self._state_timeout is not None:
+            self._state_timeout.cancel()
+
+        async def go():
+            async with self._lock:
+                if self.state == Subscription.State.UNVERIFIED:
+                    secs = 10
+                elif self.state == Subscription.State.DENIED:
+                    secs = 3
+                else:
+                    now = datetime.now(timezone.utc)
+                    secs = (self.expires_at - now).total_seconds()
+
+            if secs > 0: await asyncio.sleep(secs)
+
+            async with self._lock:
+                logger.warning(f"subscription timeout in state: state={self.state.name} session_id={self.session.session_id} subscription_id={self.subscription_id}")
+                self.state = Subscription.State.TIMEDOUT
+                await self.session.remove_subscription(self)
+                await self.session.events.put({"subscription": sub.to_dict()})
+
+        self.state = next_state
+        self._state_timeout = asyncio.ensure_future(go())
 
     @staticmethod
     async def new(session, topic):
@@ -57,7 +84,7 @@ class Subscription:
         return sub
 
     async def verify(self, lease_seconds, topic):
-        async with self.lock:
+        async with self._lock:
             if self.state != Subscription.State.UNVERIFIED:
                 raise RuntimeError(f"verifying in unexpected state: {self.state}")
 
@@ -65,16 +92,16 @@ class Subscription:
             self.verified_at = datetime.now(timezone.utc)
             self.expires_at = self.verified_at + timedelta(seconds=lease_seconds)
             self.topic = topic
-            self.state = Subscription.State.VERIFIED
+            self._transition(Subscription.State.VERIFIED)
 
             await self.session.events.put({"subscription": self.to_dict()})
 
     async def denied(self, reason):
-        async with self.lock:
+        async with self._lock:
             if self.state != Subscription.State.UNVERIFIED:
                 raise RuntimeError(f"subscription denied while in unexpected state: {self.state}")
 
-            self.state = Subscription.State.DENIED
+            self._transition(Subscription.State.DENIED)
 
             await self.session.events.put({"subscription": { **self.to_dict(), "reason": reason }})
 
@@ -110,7 +137,7 @@ class Session:
         self.base_url = base_url() + f"/sessions/{self.session_id}"
         self.subscriptions = {}
         self.created_at = datetime.now(timezone.utc)
-        self.lock = asyncio.Lock()
+        self._lock = asyncio.Lock()
 
     @staticmethod
     def new():
@@ -121,12 +148,16 @@ class Session:
 
     async def add_subscription(self, topic):
         s = await Subscription.new(self, topic)
-        async with self.lock:
+        async with self._lock:
             self.subscriptions[s.subscription_id] = s
         return s
 
+    async def remove_subscription(self, sub):
+        async with self._lock:
+            del self.subscriptions[sub.subscription_id]
+
     async def get_subsciption(self, sid):
-        async with self.lock:
+        async with self._lock:
             return self.subscriptions.get(sid)
 
     def to_dict(self):
@@ -139,19 +170,19 @@ class Session:
 
 class SessionStore:
     def __init__(self):
-        self.lock = asyncio.Lock()
+        self._lock = asyncio.Lock()
         self.sessions = {}
 
     async def get(self, sid):
-        async with self.lock:
+        async with self._lock:
             return self.sessions.get(sid)
 
     async def put(self, s):
-        async with self.lock:
+        async with self._lock:
             self.sessions[s.session_id] = s
 
     async def exists(self, sid):
-        async with self.lock:
+        async with self._lock:
             return sid in self.sessions
 
 sessions = SessionStore()

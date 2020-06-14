@@ -922,15 +922,13 @@ async def activity_feed(client, *channels):
                 topic = sub['topic']
                 if state == "UNVERIFIED":
                     logger.debug(f"verifying topic: topic={topic} callback={sub['callback_url']}")
-                    c.webhook(
-                        topic=topic,
-                        callback=sub["callback_url"],
-                        secret=sub["secret"],
-                    )
+                    c.webhook(topic=topic, callback=sub["callback_url"], secret=sub["secret"])
                 elif state == "VERIFIED":
                     logger.debug(f"verified topic: {topic}")
                 elif state == "DENIED":
                     logger.debug(f"denied subscription: topic={topic} reason={sub['reason']}")
+                elif state == "TIMEDOUT":
+                    logger.debug(f"subscription timedout: topic={topic}")
                 else:
                     logger.error(f"unexpected subscription state: state={state} topic={topic}")
             elif "event" in e:
