@@ -971,8 +971,11 @@ if __name__ == "__main__":
         args = parse_args(args)
 
     if args.activity:
-        c = Client(scope="")
-        asyncio.run(activity_feed(c, *args.channels))
+        try:
+            c = Client(scope="")
+            asyncio.run(activity_feed(c, *args.channels))
+        except KeyboardInterrupt:
+            pass
         sys.exit(0)
 
     if args.chat:

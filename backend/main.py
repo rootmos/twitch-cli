@@ -37,7 +37,7 @@ class Subscription:
         self.expires_at = None
         self.verified_at = None
         self.secret = secret
-        self.callback_url = session.base_url + f"/subscriptions/{self.subscription_id}"
+        self.callback_url = f"{session.base_url}/subscriptions/{self.subscription_id}"
 
         self._lock = asyncio.Lock()
         self.state = None
@@ -62,9 +62,9 @@ class Subscription:
 
             async with self._lock:
                 if secs > 0:
-                    logger.warning(f"subscription timeout: state={self.state.name} session_id={self.session.session_id} subscription_id={self.subscription_id}")
+                    logger.debug(f"subscription timeout: state={self.state.name} session_id={self.session.session_id} subscription_id={self.subscription_id}")
                 else:
-                    logger.warning(f"removing stale subscription: state={self.state.name} session_id={self.session.session_id} subscription_id={self.subscription_id}")
+                    logger.debug(f"removing stale subscription: state={self.state.name} session_id={self.session.session_id} subscription_id={self.subscription_id}")
 
                 self.state = Subscription.State.TIMEDOUT
                 await self.session.remove_subscription(self)
@@ -139,7 +139,9 @@ class Session:
         self.base_url = base_url() + f"/sessions/{self.session_id}"
         self.subscriptions = {}
         self.created_at = datetime.now(timezone.utc)
+
         self._lock = asyncio.Lock()
+        self._tasks = []
 
     @staticmethod
     def new():
@@ -147,6 +149,17 @@ class Session:
             session_id = str(b64Ue(secrets.token_bytes(12)), "UTF-8"),
             token = str(b64e(secrets.token_bytes(36)), "UTF-8"),
         )
+
+    async def close(self):
+        async with self._lock:
+            for t in self._tasks: t.cancel()
+
+    async def is_active(self):
+        async with self._lock:
+            for sub in self.subscriptions.values():
+                if sub.state == Subscription.State.VERIFIED:
+                    return True
+            return False
 
     async def add_subscription(self, topic):
         s = await Subscription.new(self, topic)
@@ -170,10 +183,42 @@ class Session:
             "subscriptions": self.subscriptions,
         }
 
+    async def run(self, ws):
+        await ws.send(json.dumps({"session": self.to_dict()}))
+
+        async def event_loop(ws):
+            while True:
+                e = await self.events.get()
+                logger.debug(f"propagating event: session_id={self.session_id} event={e}")
+                await ws.send(json.dumps(e))
+
+        async def request_loop(ws):
+            while True:
+                e = json.loads(await ws.recv())
+                if "subscription" in e:
+                    topic = e["subscription"]["topic"]
+                    logger.debug(f"allocating subscription: topic={topic} session_id={self.session_id}")
+                    await self.add_subscription(topic)
+                else:
+                    logger.warn(f"unknown request: {e}")
+                    await ws.send(json.dumps({
+                        "error": "unknown request",
+                        "request": e
+                    }))
+
+        async with self._lock:
+            self.tasks = [
+                asyncio.ensure_future(event_loop(ws)),
+                asyncio.ensure_future(request_loop(ws)),
+            ]
+
+        await asyncio.gather(*self.tasks)
+
 class SessionStore:
     def __init__(self):
         self._lock = asyncio.Lock()
         self.sessions = {}
+        self.monitors = {}
 
     async def get(self, sid):
         async with self._lock:
@@ -182,41 +227,33 @@ class SessionStore:
     async def put(self, s):
         async with self._lock:
             self.sessions[s.session_id] = s
+            self.monitors[s.session_id] = asyncio.ensure_future(self._monitor_session(s))
+
+    async def remove(self, s):
+        async with self._lock:
+            del self.sessions[s.session_id]
+            del self.monitors[s.session_id]
 
     async def exists(self, sid):
         async with self._lock:
             return sid in self.sessions
+
+    async def _monitor_session(self, s):
+        await asyncio.sleep(15)
+        while await s.is_active():
+            await asyncio.sleep(30)
+        logger.info(f"removing inactive session: session_id={s.session_id}")
+        await self.remove(s)
+        await s.close()
 
 sessions = SessionStore()
 
 @wsapp.websocket("/sessions")
 async def run_session(req, ws):
     s = Session.new()
-    logger.info(f"new session: session_id={s.session_id}")
+    logger.info(f"new connection: session_id={s.session_id}")
     await sessions.put(s)
-    await ws.send(json.dumps({"session": s.to_dict()}))
-
-    async def do_propagate_events():
-        while True:
-            e = await s.events.get()
-            logger.debug(f"propagating event: session_id={s.session_id} event={e}")
-            await ws.send(json.dumps(e))
-
-    async def do_read_reqs():
-        while True:
-            e = json.loads(await ws.recv())
-            if "subscription" in e:
-                topic = e["subscription"]["topic"]
-                logger.debug(f"allocating subscription: topic={topic} session_id={s.session_id}")
-                await s.add_subscription(topic)
-            else:
-                logger.warn(f"unknown request: {e}")
-                await ws.send(json.dumps({
-                    "error": "unknown request",
-                    "request": e
-                }))
-
-    await asyncio.gather(do_propagate_events(), do_read_reqs())
+    await s.run(ws)
 
 @app.route("/sessions/<session_id>/subscriptions/<subscription_id>", methods=["POST", "GET"])
 async def handle_subscriptions(req, session_id, subscription_id):
@@ -234,11 +271,7 @@ async def handle_subscriptions(req, session_id, subscription_id):
         topic = req.args["hub.topic"][0]
         if mode == "subscribe":
             logger.debug(f"verifying session: session_id={session_id} subscription_id={subscription_id} topic={topic}")
-            await sub.verify(
-                lease_seconds=int(req.args["hub.lease_seconds"][0]),
-                topic=topic,
-            )
-
+            await sub.verify(lease_seconds=int(req.args["hub.lease_seconds"][0]), topic=topic)
             return response.text(req.args["hub.challenge"][0])
         elif mode == "unsubscribe":
             logger.warning(f"unhandled unsubscribe requeuest: session_id={session_id} subscription_id={subscription_id} topic={topic}")
