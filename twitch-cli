@@ -873,21 +873,21 @@ class Chat:
         for c in ctx.channels:
             await ctx.send_line(f"JOIN #{c}")
 
-        async def _read():
+        async def do_read():
             while True:
                 bs = await ctx.reader.readuntil(separator=b'\r\n')
                 bs = bs[:-2]
                 logger.debug(f"received IRC message: {bs}")
                 await ctx._handle_message(IRCMessage(bs), join_parts=join_parts)
 
-        async def _write():
+        async def do_write():
             while True:
                 bs = await ctx.queue.get()
                 ctx.writer.write(bs)
                 ctx.queue.task_done()
                 logger.debug(f"sending IRC message: {bs}")
 
-        await asyncio.gather(_read(), _write(), *inputs)
+        await asyncio.gather(do_read(), do_write(), *inputs)
 
 
 import websockets
@@ -898,30 +898,53 @@ async def activity_feed(client, *channels):
     us = client.user(*channels)
 
     async with websockets.connect(url) as ws:
-        s = json.loads(await ws.recv())["session"]
+        session = json.loads(await ws.recv())["session"]
+
+        follows_base_url = "https://api.twitch.tv/helix/users/follows"
+        streams_base_url = "https://api.twitch.tv/helix/streams"
 
         for u in us:
-            c.webhook(
-                topic=f"https://api.twitch.tv/helix/users/follows?first=1&to_id={u.user_id}",
-                callback=s["callback_urls"]["/users/follows"],
-                secret=s["secret"]
-            )
+            topics = [
+                f"{follows_base_url}?first=1&to_id={u.user_id}",
+                f"{streams_base_url}?user_id={u.user_id}",
+            ]
 
-            c.webhook(
-                topic=f"https://api.twitch.tv/helix/streams?user_id={u.user_id}",
-                callback=s["callback_urls"]["/streams"],
-                secret=s["secret"]
-            )
+            for t in topics:
+                logger.debug(f"subscribing to topic: {t}")
+                await ws.send(json.dumps({"subscription": {"topic": t}}))
 
         while True:
             e = json.loads(await ws.recv())
-            if e["topic"] == "/users/follows":
-                ts = datetime.strptime(e["event"]["followed_at"], "%Y-%m-%dT%H:%M:%S%z").astimezone()
-                f = e["event"]["from_name"]
-                t = e["event"]["to_name"]
-                print(f"{ts.isoformat(timespec='seconds')} {f} followed {t}")
-            elif e["topic"] == "/stream":
-                print(e["event"])
+
+            if "subscription" in e:
+                sub = e["subscription"]
+                state = sub["state"]
+                topic = sub['topic']
+                if state == "UNVERIFIED":
+                    logger.debug(f"verifying topic: topic={topic} callback={sub['callback_url']}")
+                    c.webhook(
+                        topic=topic,
+                        callback=sub["callback_url"],
+                        secret=sub["secret"],
+                    )
+                elif state == "VERIFIED":
+                    logger.debug(f"verified topic: {topic}")
+                elif state == "DENIED":
+                    logger.debug(f"denied subscription: topic={topic} reason={sub['reason']}")
+                else:
+                    logger.error(f"unexpected subscription state: state={state} topic={topic}")
+            elif "event" in e:
+                topic = e["event"]["topic"]
+                payload = e["event"]["payload"]
+                if topic.startswith(follows_base_url):
+                    ts = datetime.strptime(payload["followed_at"], "%Y-%m-%dT%H:%M:%S%z").astimezone()
+                    f = payload["from_name"]
+                    t = payload["to_name"]
+                    print(f"{ts.isoformat(timespec='seconds')} {f} followed {t}")
+                else:
+                    logger.warn("unhandled event: {e}")
+            else:
+                logger.warn(f"unexpected message: {e}")
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(add_help=False)
