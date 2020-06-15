@@ -14,10 +14,7 @@ from datetime import datetime, timezone, timedelta
 
 PORT = os.getenv("PORT", default=8000)
 WSPORT = os.getenv("WSPORT", default=8001)
-host = os.getenv("HOST", default=None)
-
-def base_url():
-    return f"http://{host}:{PORT}"
+EXTERNAL_URL = os.getenv("EXTERNAL_URL")
 
 app = Sanic("twitch webhook to websocket adapter (http)")
 wsapp = Sanic("twitch webhook to websocket adapter (websocket)")
@@ -136,7 +133,7 @@ class Session:
         self.events = asyncio.Queue()
         self.session_id = session_id
         self.token = token
-        self.base_url = base_url() + f"/sessions/{self.session_id}"
+        self.base_url = f"{EXTERNAL_URL}/sessions/{self.session_id}"
         self.subscriptions = {}
         self.created_at = datetime.now(timezone.utc)
 
@@ -311,13 +308,7 @@ async def handle_subscriptions(req, session_id, subscription_id):
 
         return response.empty(status=204)
 
-
 if __name__ == "__main__":
-    if host is None:
-        r = httpx.get("http://169.254.169.254/latest/meta-data/public-hostname")
-        r.raise_for_status()
-        host = r.text
-
     loop = asyncio.get_event_loop()
     loop.create_task(app.create_server(host="0.0.0.0", port=PORT, return_asyncio_server=True))
     loop.create_task(wsapp.create_server(host="0.0.0.0", port=WSPORT, return_asyncio_server=True))
