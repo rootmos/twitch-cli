@@ -1,4 +1,4 @@
-VENV = $(shell readlink -f ./venv)
+VENV ?= $(shell readlink -f ./venv)
 HOST_PYTHON ?= python3
 
 export PYTHON = $(VENV)/bin/python3
