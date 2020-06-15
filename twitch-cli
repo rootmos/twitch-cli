@@ -753,7 +753,7 @@ class Chat:
     async def send_line(self, line):
         await self.queue.put(bytes(line + "\r\n", "UTF-8"))
 
-    async def _channel_input(self, channel, path, echo):
+    async def _channel_input(self, channel, path):
         logger.debug(f"reading chat input to {channel} from: {path}")
         async def go(r, w):
             logger.debug(f"client connected to chat input for {channel}")
