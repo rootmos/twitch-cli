@@ -266,6 +266,24 @@ class Client:
         r = requests.delete(url, json=body, headers=h)
         r.raise_for_status()
 
+    def post(self, url, body=None, kraken=False):
+        if kraken:
+            url = kraken_url + url
+            h = {
+                "Authorization": f"OAuth {self.token}",
+                "Client-ID": client_id,
+                "Accept": "application/vnd.twitchtv.v5+json",
+            }
+        else:
+            url = helix_url + url
+            h = {
+                "Authorization": f"Bearer {self.token}",
+                "Client-ID": client_id,
+            }
+
+        r = requests.post(url, json=body, headers=h)
+        r.raise_for_status()
+
     def get(self, url, params=None, kraken=False):
         if kraken:
             url = kraken_url + url
@@ -336,6 +354,17 @@ class Client:
         for u in self.user(*channels):
             self.delete(f"/users/{self.me.user_id}/follows/channels/{u.user_id}", kraken=True)
             logger.info(f"unfollowed {u.user_name} ({u.user_id})")
+
+    def webhook(self, topic, callback, secret, lease_seconds=180):
+        body = {
+            "hub.topic": topic,
+            "hub.callback": callback,
+            "hub.mode": "subscribe",
+            "hub.lease_seconds": lease_seconds,
+            "hub.secret": secret,
+        }
+
+        self.post(f"/webhooks/hub", body=body)
 
 class User:
     def __init__(self, client, user_id, user_name, title=None):
@@ -575,6 +604,7 @@ def parse_args(args):
             help=f"create chat input channel at PATH/CHANNEL (default: ~/.twitch-cli/channel)")
     parser.add_argument("--chat-read-only", action="store_true", default=False, help="lurker mode")
     parser.add_argument("--chat-join-parts", action="store_true", default=False, help="display who joins and leaves the chat")
+    parser.add_argument("--activity", action="store_true", help="activity feed")
     parser.add_argument("--follow", metavar="CHANNEL", action="append", help="follow CHANNEL (may be used multiple times)")
     parser.add_argument("--unfollow", metavar="CHANNEL", action="append", help="unfollow CHANNEL (may be used multiple times)")
     parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
@@ -723,7 +753,7 @@ class Chat:
     async def send_line(self, line):
         await self.queue.put(bytes(line + "\r\n", "UTF-8"))
 
-    async def _channel_input(self, channel, path, echo):
+    async def _channel_input(self, channel, path):
         logger.debug(f"reading chat input to {channel} from: {path}")
         async def go(r, w):
             logger.debug(f"client connected to chat input for {channel}")
@@ -843,22 +873,88 @@ class Chat:
         for c in ctx.channels:
             await ctx.send_line(f"JOIN #{c}")
 
-        async def _read():
+        async def do_read():
             while True:
                 bs = await ctx.reader.readuntil(separator=b'\r\n')
                 bs = bs[:-2]
                 logger.debug(f"received IRC message: {bs}")
                 await ctx._handle_message(IRCMessage(bs), join_parts=join_parts)
 
-        async def _write():
+        async def do_write():
             while True:
                 bs = await ctx.queue.get()
                 ctx.writer.write(bs)
                 ctx.queue.task_done()
                 logger.debug(f"sending IRC message: {bs}")
 
-        await asyncio.gather(_read(), _write(), *inputs)
+        await asyncio.gather(do_read(), do_write(), *inputs)
 
+
+import websockets
+async def activity_feed(client, *channels):
+    base = "wss://ws.twitch.rootmos.io"
+    url = base + "/sessions"
+
+    us = client.user(*channels)
+
+    async with websockets.connect(url) as ws:
+        session = json.loads(await ws.recv())["session"]
+
+        follows_base_url = "https://api.twitch.tv/helix/users/follows"
+        streams_base_url = "https://api.twitch.tv/helix/streams"
+
+        for u in us:
+            topics = [
+                f"{follows_base_url}?first=1&to_id={u.user_id}",
+                f"{streams_base_url}?user_id={u.user_id}",
+            ]
+
+            for t in topics:
+                logger.debug(f"subscribing to topic: {t}")
+                await ws.send(json.dumps({"subscription": {"topic": t}}))
+
+        while True:
+            e = json.loads(await ws.recv())
+
+            if "subscription" in e:
+                sub = e["subscription"]
+                state, topic, callback, secret = sub["state"], sub["topic"], sub["callback_url"], sub["secret"]
+                if state == "UNVERIFIED":
+                    logger.debug(f"verifying topic: topic={topic} callback={callback}")
+                    c.webhook(topic=topic, callback=callback, secret=secret)
+                elif state == "VERIFIED":
+                    logger.debug(f"verified topic: {topic}")
+
+                    async def resub(delay, topic, callback, secret):
+                        if delay > 0:
+                            logger.debug(f"resubscription timer: seconds={delay} topic={topic}")
+                            await asyncio.sleep(delay)
+                        logger.debug(f"resubscribing: topic={topic}")
+                        c.webhook(topic=topic, callback=callback, secret=secret)
+
+                    eat = datetime.fromisoformat(sub["expires_at"])
+                    vat = datetime.fromisoformat(sub["verified_at"])
+                    now = datetime.now(timezone.utc)
+                    delay = ((vat + (eat-vat)*0.75) - now).total_seconds()
+                    asyncio.ensure_future(resub(delay, topic, callback, secret))
+                elif state == "DENIED":
+                    logger.debug(f"denied subscription: topic={topic} reason={sub['reason']}")
+                elif state == "TIMEDOUT":
+                    logger.warning(f"subscription timedout: topic={topic}")
+                else:
+                    logger.error(f"unexpected subscription state: state={state} topic={topic}")
+            elif "event" in e:
+                topic = e["event"]["topic"]
+                payload = e["event"]["payload"]
+                if topic.startswith(follows_base_url):
+                    ts = datetime.strptime(payload["followed_at"], "%Y-%m-%dT%H:%M:%S%z").astimezone()
+                    f = payload["from_name"]
+                    t = payload["to_name"]
+                    print(f"{ts.isoformat(timespec='seconds')} {f} followed {t}")
+                else:
+                    logger.warn(f"unhandled event: {e}")
+            else:
+                logger.warn(f"unexpected message: {e}")
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(add_help=False)
@@ -873,6 +969,14 @@ if __name__ == "__main__":
         sys.exit(0)
     else:
         args = parse_args(args)
+
+    if args.activity:
+        try:
+            c = Client(scope="")
+            asyncio.run(activity_feed(c, *args.channels))
+        except KeyboardInterrupt:
+            pass
+        sys.exit(0)
 
     if args.chat:
         try:
