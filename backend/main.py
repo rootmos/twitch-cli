@@ -12,8 +12,8 @@ import hmac
 import enum
 from datetime import datetime, timezone, timedelta
 
-PORT = os.getenv("PORT", default=8000)
-WSPORT = os.getenv("WSPORT", default=8001)
+PORT = int(os.getenv("PORT", default="8000"))
+WSPORT = int(os.getenv("WSPORT", default="8001"))
 EXTERNAL_URL = os.getenv("EXTERNAL_URL")
 
 app = Sanic("twitch webhook to websocket adapter (http)")
@@ -310,6 +310,6 @@ async def handle_subscriptions(req, session_id, subscription_id):
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.create_task(app.create_server(host="0.0.0.0", port=PORT, return_asyncio_server=True))
-    loop.create_task(wsapp.create_server(host="0.0.0.0", port=WSPORT, return_asyncio_server=True))
+    loop.create_task(app.create_server(host="0.0.0.0", port=PORT, debug=True, access_log=True, return_asyncio_server=True))
+    loop.create_task(wsapp.create_server(host="0.0.0.0", port=WSPORT, debug=True, access_log=True, return_asyncio_server=True))
     loop.run_forever()
