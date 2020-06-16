@@ -10,6 +10,7 @@
   - `twitch-cli --chat rootmos2` in one terminal and
     `socat readline unix:~/.twitch-cli/channel/rootmos2` in another
     ([tmux](https://tmux.github.io/) sounds perfect for this, no?)
+* follow channels activity: follows and stream up/down events
 
 ## Example
 The menu option makes for a simple Twitch GUI when paired
@@ -27,9 +28,9 @@ however it doesn't list videos (at the time of writing).
 ```
 usage: twitch-cli [-h] [--following] [--menu] [--json]
                   [--menu-lines MENU_LINES] [--chat] [--chat-input-path PATH]
-                  [--chat-read-only] [--chat-join-parts] [--follow CHANNEL]
-                  [--unfollow CHANNEL] [--title-max-length TITLE_MAX_LENGTH]
-                  [--since SINCE]
+                  [--chat-read-only] [--chat-join-parts] [--activity]
+                  [--follow CHANNEL] [--unfollow CHANNEL]
+                  [--title-max-length TITLE_MAX_LENGTH] [--since SINCE]
                   [CHANNEL [CHANNEL ...]]
 
 Twitch command line interface
@@ -50,6 +51,7 @@ optional arguments:
                         ~/.twitch-cli/channel)
   --chat-read-only      lurker mode
   --chat-join-parts     display who joins and leaves the chat
+  --activity            activity feed
   --follow CHANNEL      follow CHANNEL (may be used multiple times)
   --unfollow CHANNEL    unfollow CHANNEL (may be used multiple times)
   --title-max-length TITLE_MAX_LENGTH

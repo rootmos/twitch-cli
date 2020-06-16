@@ -948,9 +948,11 @@ async def activity_feed(client, *channels):
                 payload = e["event"]["payload"]
                 if topic.startswith(follows_base_url):
                     ts = datetime.strptime(payload["followed_at"], "%Y-%m-%dT%H:%M:%S%z").astimezone()
+                    ts = ts.replace(tzinfo=None)
+                    d = ts.isoformat(timespec='seconds')
                     f = payload["from_name"]
                     t = payload["to_name"]
-                    print(f"{ts.isoformat(timespec='seconds')} {f} followed {t}")
+                    print(f"{d} {f} followed {t}")
                 else:
                     logger.warn(f"unhandled event: {e}")
             else:
@@ -970,23 +972,29 @@ if __name__ == "__main__":
     else:
         args = parse_args(args)
 
-    if args.activity:
-        try:
+    if args.activity or args.chat:
+        if args.chat:
+            c = Client(scope="chat:read") if args.chat_read_only else Client(scope="chat:read chat:edit")
+        else:
             c = Client(scope="")
-            asyncio.run(activity_feed(c, *args.channels))
-        except KeyboardInterrupt:
-            pass
-        sys.exit(0)
 
-    if args.chat:
-        try:
-            asyncio.run(Chat.run(
-                client = Client(scope="chat:read") if args.chat_read_only else Client(scope="chat:read chat:edit"),
+        loop = asyncio.get_event_loop()
+
+        if args.activity:
+            loop.create_task(activity_feed(c, *args.channels))
+
+        if args.chat:
+            loop.create_task(Chat.run(
+                client = c,
                 input_path = args.chat_input_path,
                 read_only = args.chat_read_only,
                 join_parts = args.chat_join_parts,
                 channels = args.channels,
-                ))
+                )
+            )
+
+        try:
+            loop.run_forever()
         except KeyboardInterrupt:
             pass
         sys.exit(0)
