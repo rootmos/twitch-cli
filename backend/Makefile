@@ -7,9 +7,6 @@ export PIP = $(VENV)/bin/pip
 run: deps
 	$(PYTHON) main.py
 
-deploy:
-	./deploy.sh
-
 deps: .requirements.flag
 
 REQUIREMENTS=requirements.txt
@@ -21,10 +18,8 @@ freeze: deps
 unfreeze:
 	sed -i '/^# freeze/,$$d' "$(REQUIREMENTS)"
 
-$(VENV):
-	$(HOST_PYTHON) -m venv $@
-
-.requirements.flag: requirements.txt | $(VENV)
+.requirements.flag: requirements.txt
+	$(HOST_PYTHON) -m venv "$(VENV)"
 	$(PIP) install -r $<
 	touch $@
 
