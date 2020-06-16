@@ -940,7 +940,7 @@ async def activity_feed(client, *channels):
                 elif state == "DENIED":
                     logger.debug(f"denied subscription: topic={topic} reason={sub['reason']}")
                 elif state == "TIMEDOUT":
-                    logger.debug(f"subscription timedout: topic={topic}")
+                    logger.warning(f"subscription timedout: topic={topic}")
                 else:
                     logger.error(f"unexpected subscription state: state={state} topic={topic}")
             elif "event" in e:

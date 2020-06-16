@@ -1,3 +1,4 @@
+import argparse
 import secrets
 from base64 import b64encode as b64e, urlsafe_b64encode as b64Ue
 from sanic import Sanic, response
@@ -5,6 +6,7 @@ from sanic.log import logger
 import httpx
 from uuid import uuid4
 import os
+import sys
 import asyncio
 import json
 import hashlib
@@ -308,7 +310,24 @@ async def handle_subscriptions(req, session_id, subscription_id):
 
         return response.empty(status=204)
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Twitch webhook to websocket adapter')
+    parser.add_argument("--daemon", help="daemonize", action="store_true")
+    parser.add_argument("--pid-file", default=None, help="daemonize")
+    return parser.parse_args()
+
 if __name__ == "__main__":
+    args = parse_args()
+
+    if args.daemon:
+        p = os.fork()
+        if p != 0:
+            logger.info(f"forked into: {p}")
+            if args.pid_file is not None:
+                with open(args.pid_file, "w+") as f:
+                    f.write(p)
+            sys.exit(0)
+
     logger.info(f"serving external URL: {EXTERNAL_URL}")
     loop = asyncio.get_event_loop()
     loop.create_task(app.create_server(host="0.0.0.0", port=PORT, return_asyncio_server=True))
