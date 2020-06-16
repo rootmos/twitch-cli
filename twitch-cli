@@ -892,7 +892,7 @@ class Chat:
 
 import websockets
 async def activity_feed(client, *channels):
-    base = "ws://ec2-3-127-249-247.eu-central-1.compute.amazonaws.com:8001"
+    base = "wss://ws.twitch.rootmos.io"
     url = base + "/sessions"
 
     us = client.user(*channels)
