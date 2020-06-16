@@ -311,6 +311,6 @@ async def handle_subscriptions(req, session_id, subscription_id):
 if __name__ == "__main__":
     logger.info(f"serving external URL: {EXTERNAL_URL}")
     loop = asyncio.get_event_loop()
-    loop.create_task(app.create_server(host="0.0.0.0", port=PORT, debug=True, access_log=True, return_asyncio_server=True))
-    loop.create_task(wsapp.create_server(host="0.0.0.0", port=WSPORT, debug=True, access_log=True, return_asyncio_server=True))
+    loop.create_task(app.create_server(host="0.0.0.0", port=PORT, return_asyncio_server=True))
+    loop.create_task(wsapp.create_server(host="0.0.0.0", port=WSPORT, return_asyncio_server=True))
     loop.run_forever()
