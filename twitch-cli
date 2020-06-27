@@ -19,6 +19,7 @@ import errno
 import asyncio
 import logging
 import websockets
+import curses
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -387,7 +388,7 @@ class Client:
             for c in j["comments"]:
                 cs.append(Comment.from_twitch_json(self, c))
             if "_next" not in j:
-                return cs
+                return sorted(cs, key=lambda c: c.created_at)
             p["cursor"] = j["_next"]
 
 class User:
@@ -786,6 +787,55 @@ class Comment:
             body = j["message"]["body"],
             video = client.video(j["content_id"]),
         )
+
+class ChatViewer:
+    def __init__(self, client, comments):
+        self.client = client
+        self.indent = 4
+        self.comments = sorted(comments, key=lambda c: c.created_at)
+
+    def _render_comment(self, c, x):
+        d = c.created_at.isoformat(timespec='seconds')
+        s = f"{d} {c.user.user_name}: {c.body}"
+
+        ls = []
+        while len(s) > 0:
+            if len(ls) > 0:
+                n = x - self.indent
+                ls.append(" "*self.indent + s[:x])
+                s = s[n:]
+            else:
+                ls.append(s[:x])
+                s = s[x:]
+        return ls
+
+    def _screen(self, offset, stdscr):
+        y, x = stdscr.getmaxyx()
+        stdscr.clear()
+
+        Y = y - 1
+        while Y >= 0 and offset > 0:
+            c = self.comments[offset]
+            for l in reversed(self._render_comment(c, x)):
+                stdscr.addstr(Y, 0, l)
+                Y -= 1
+                if Y < 0: break
+            offset -= 1
+        stdscr.refresh()
+
+    def _main(self, stdscr):
+        i, m = 0, 0
+        for j, c in enumerate(v.comments):
+            if len(c.body) > m:
+                i, m = j, len(c.body)
+
+        self._screen(i, stdscr)
+        time.sleep(2)
+
+    @staticmethod
+    def run(client, comments):
+        cv = ChatViewer(client, comments)
+        curses.wrapper(cv._main)
 
 class Chat:
     def __init__(self, client, channels, reader, writer):
