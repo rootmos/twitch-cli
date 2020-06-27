@@ -1028,13 +1028,13 @@ if __name__ == "__main__":
     else:
         fs = c.me.following()
 
-    since = datetime.now(timezone.utc) - timedelta(days=args.since)
-
     vs = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
-        for f in [ ex.submit(lambda f: f.videos(since=since), f) for f in fs ]:
-            vs += f.result()
-    vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
+    if args.since is not None and args.since != 0:
+        since = datetime.now(timezone.utc) - timedelta(days=args.since)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
+            for f in [ ex.submit(lambda f: f.videos(since=since), f) for f in fs ]:
+                vs += f.result()
+        vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
 
     if args.json:
         for v in vs: print(json.dumps(v.to_dict()))
