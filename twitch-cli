@@ -18,6 +18,7 @@ import select
 import errno
 import asyncio
 import logging
+import websockets
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,6 +33,7 @@ redirect_uri = f"http://{redirect_host}:{redirect_port}{redirect_path}"
 
 helix_url = "https://api.twitch.tv/helix"
 kraken_url = "https://api.twitch.tv/kraken"
+v5_url = "https://api.twitch.tv/v5"
 oauth2_url = "https://id.twitch.tv/oauth2"
 irc_addr = ("irc.chat.twitch.tv", 6697)
 
@@ -75,6 +77,31 @@ def render_duration(secs):
         s += f"{secs}s"
 
     return s
+
+def parse_datetime(s):
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+
+    r = re.compile("(\d\d\d\d)-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(.\d?\d?\d)?Z")
+    m = r.match(s)
+
+    if m.groups()[6] is not None:
+        us = int(m.groups()[6].lstrip("."))*1000
+    else:
+        us = 0
+
+    return datetime(
+        year = int(m.group(1)),
+        month = int(m.group(2)),
+        day = int(m.group(3)),
+        hour = int(m.group(4)),
+        minute = int(m.group(5)),
+        second = int(m.group(6)),
+        microsecond = us,
+        tzinfo = timezone.utc,
+    )
 
 # logging
 
@@ -205,6 +232,9 @@ def get_token(scopes):
 class Client:
     def __init__(self, scopes=None, token=None):
         self._me = None
+        self._channels = {}
+        self._videos = {}
+        self._session = requests.Session()
         if token is not None:
             self.token = token
         elif scopes is not None:
@@ -231,7 +261,7 @@ class Client:
 
         return self._me
 
-    def put(self, url, body=None, kraken=False):
+    def _request(self, method, url, body=None, params=None, kraken=False, v5=False):
         if kraken:
             url = kraken_url + url
             h = {
@@ -239,6 +269,10 @@ class Client:
                 "Client-ID": client_id,
                 "Accept": "application/vnd.twitchtv.v5+json",
             }
+        elif v5:
+            url = v5_url + url
+            h = None
+            params = { **(params or {}),  "client_id": client_id }
         else:
             url = helix_url + url
             h = {
@@ -246,72 +280,24 @@ class Client:
                 "Client-ID": client_id,
             }
 
-        r = requests.put(url, json=body, headers=h)
-        r.raise_for_status()
+        req = requests.Request(method, url, json=body, headers=h, params=params).prepare()
+        rsp = self._session.send(req)
+        rsp.raise_for_status()
 
-    def delete(self, url, body=None, kraken=False):
-        if kraken:
-            url = kraken_url + url
-            h = {
-                "Authorization": f"OAuth {self.token}",
-                "Client-ID": client_id,
-                "Accept": "application/vnd.twitchtv.v5+json",
-            }
-        else:
-            url = helix_url + url
-            h = {
-                "Authorization": f"Bearer {self.token}",
-                "Client-ID": client_id,
-            }
+        if method == "GET":
+            return rsp.json()
 
-        r = requests.delete(url, json=body, headers=h)
-        r.raise_for_status()
+    def put(self, url, **kwargs):
+        self._request("PUT", url, **kwargs)
 
-    def post(self, url, body=None, kraken=False):
-        if kraken:
-            url = kraken_url + url
-            h = {
-                "Authorization": f"OAuth {self.token}",
-                "Client-ID": client_id,
-                "Accept": "application/vnd.twitchtv.v5+json",
-            }
-        else:
-            url = helix_url + url
-            h = {
-                "Authorization": f"Bearer {self.token}",
-                "Client-ID": client_id,
-            }
+    def delete(self, url, **kwargs):
+        self._request("DELETE", url, **kwargs)
 
-        r = requests.post(url, json=body, headers=h)
-        r.raise_for_status()
+    def post(self, url, **kwargs):
+        self._request("POST", url, **kwargs)
 
-    def get(self, url, params=None, kraken=False):
-        if kraken:
-            url = kraken_url + url
-            h = {
-                "Authorization": f"OAuth {self.token}",
-                "Client-ID": client_id,
-                "Accept": "application/vnd.twitchtv.v5+json",
-            }
-        else:
-            url = helix_url + url
-            h = {
-                "Authorization": f"Bearer {self.token}",
-                "Client-ID": client_id,
-            }
-
-        while True:
-            r = requests.get(url, params=params, headers=h)
-            if r.status_code == 429:
-                l = r.headers["Ratelimit-Limit"]
-                t = int(r.headers["Ratelimit-Reset"])
-                w = (t - time.time()) / 10
-                eprint(f"calm down! limit={l} reset={t} wait={w}")
-                time.sleep(w)
-                continue
-
-            r.raise_for_status()
-            return r.json()
+    def get(self, url, **kwargs):
+        return self._request("GET", url, **kwargs)
 
     def streams(self, user):
         try:
@@ -344,7 +330,9 @@ class Client:
         return us
 
     def channel(self, id):
-        return Channel.from_twitch_json(self, self.get(f"/channels/{id}", kraken=True))
+        if id not in self._channels:
+            self._channels[id] = Channel.from_twitch_json(self, self.get(f"/channels/{id}", kraken=True))
+        return self._channels[id]
 
     def follow(self, *channels):
         for u in self.user(*channels):
@@ -367,6 +355,41 @@ class Client:
 
         self.post(f"/webhooks/hub", body=body)
 
+    def video(self, *vid):
+        vs = []
+
+        fetch = []
+        for i in vid:
+            if i in self._videos:
+                vs.append(self._videos[i])
+            else:
+                fetch.append(i)
+
+        if len(fetch) == 0:
+            return vs
+
+        logger.info(f"fetching videos: {' '.join(fetch)}")
+        while len(fetch) > 0:
+            p = { "id": fetch[:100] }
+            j = self.get("/videos", params=p)
+            for v in j["data"]:
+                v = Video.from_twitch_json(self, v)
+                vs.append(v)
+                self._videos[v.video_id] = v
+            fetch = fetch[100:]
+        return vs
+
+    def comments(self, vid):
+        cs = []
+        p = {}
+        while True:
+            j = self.get(f"/videos/{vid}/comments", v5=True, params=p)
+            for c in j["comments"]:
+                cs.append(Comment.from_twitch_json(self, c))
+            if "_next" not in j:
+                return cs
+            p["cursor"] = j["_next"]
+
 class User:
     def __init__(self, client, user_id, user_name, title=None):
         self.client = client
@@ -382,10 +405,15 @@ class User:
 
     @staticmethod
     def from_twitch_json(client, j):
-        if "login" in j:
-            return User(client, user_id=j["id"], user_name=j["login"])
-        else:
-            return User(client, user_id=j["user_id"], user_name=j["user_name"])
+        if "login" in j: user_name = j["login"]
+        elif "user_name" in j: user_name = j["user_name"]
+        elif "display_name" in j: user_name = j["display_name"]
+
+        if "id" in j: user_id = j["id"]
+        elif "_id" in j: user_id = j["_id"]
+        elif "user_id" in j: user_id = j["user_id"]
+
+        return User(client, user_id=user_id, user_name=user_name)
 
     @property
     def channel(self):
@@ -410,7 +438,7 @@ class User:
         return sorted(us, key=lambda u: u.user_name.lower())
 
     def videos(self, since=None):
-        p = { "user_id": self.user_id, "first": 10, "sort": "time" }
+        p = { "user_id": self.user_id, "first": 100, "sort": "time" }
         vs = []
         while True:
             j = self.client.get("/videos", params=p)
@@ -488,12 +516,19 @@ class Video:
         self.published_at = published_at
         self.duration = duration
         self.typ = typ
+        self._comments = None
 
     def __str__(self):
         return self.title
 
     def __repr__(self):
         return f"{self.user.user_name}: {self.title} ({self.video_id})"
+
+    @property
+    def comments(self):
+        if self._comments is None:
+            self._comments = self.client.comments(self.video_id)
+        return self._comments
 
     def from_twitch_json(client, j):
         if "created_at" in j and j["created_at"] is not None:
@@ -638,7 +673,6 @@ def edit(v):
         f.seek(0)
         return str(f.read(), "UTF-8")
 
-
 def run_manager(args):
     c = None
     run_default_action = True
@@ -731,6 +765,27 @@ class IRCMessage:
         if m is None: return acc, s
         acc[m.group(1)] = m.group(4)
         return IRCMessage.__parse_tag(s[m.end(0):], acc)
+
+class Comment:
+    def __init__(self, client, msg_id, user, created_at, channel, video, body):
+        self.client = client
+        self.msg_id = msg_id
+        self.user = user
+        self.body = body
+        self.created_at = created_at
+        self.video = video
+
+    @staticmethod
+    def from_twitch_json(client, j):
+        return Comment(
+            client = client,
+            msg_id = j["_id"],
+            user = User.from_twitch_json(client, j["commenter"]),
+            channel = client.channel(j["channel_id"]),
+            created_at = parse_datetime(j["created_at"]),
+            body = j["message"]["body"],
+            video = client.video(j["content_id"]),
+        )
 
 class Chat:
     def __init__(self, client, channels, reader, writer):
@@ -890,8 +945,6 @@ class Chat:
 
         await asyncio.gather(do_read(), do_write(), *inputs)
 
-
-import websockets
 async def activity_feed(client, *channels):
     base = "wss://ws.twitch.rootmos.io"
     url = base + "/sessions"
