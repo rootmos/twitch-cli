@@ -184,7 +184,7 @@ def new_token(scope):
 
     return token
 
-def get_token(scope):
+def get_token(scopes):
     p = Path("~/.twitch-cli.json").expanduser()
     if p.exists():
         with p.open() as f: s = json.loads(f.read())
@@ -193,6 +193,7 @@ def get_token(scope):
 
     if "tokens" not in s: s["tokens"] = {}
 
+    scope = " ".join(sorted(scopes))
     if scope not in s["tokens"]:
         s["tokens"][scope] = new_token(scope)
         with p.open("w") as f: f.write(json.dumps(s))
@@ -202,14 +203,14 @@ def get_token(scope):
 # the client
 
 class Client:
-    def __init__(self, token=None, scope=None):
+    def __init__(self, scopes=None, token=None):
         self._me = None
         if token is not None:
             self.token = token
-        elif scope is not None:
-            self.token = get_token(scope)
+        elif scopes is not None:
+            self.token = get_token(scopes)
         else:
-            raise ValueError("specify either token or scope")
+            raise ValueError("specify either token or scopes")
 
     @property
     def me(self):
@@ -643,21 +644,21 @@ def run_manager(args):
     run_default_action = True
 
     if args.edit_title:
-        c = c or Client(scope="channel_editor")
+        c = c or Client(scopes=["channel_editor"])
         c.me.channel.status = edit(c.me.channel.status)
         run_default_action = False
 
     if args.set_title is not None:
-        c = c or Client(scope="channel_editor")
+        c = c or Client(scopes=["channel_editor"])
         c.me.channel.status = args.set_title
         run_default_action = False
 
     if args.set_category is not None:
-        c = c or Client(scope="channel_editor")
+        c = c or Client(scopes=["channel_editor"])
         c.me.channel.game = args.set_category
         run_default_action = False
 
-    c = c or Client(scope="")
+    c = c or Client(scopes=[])
     if args.title or args.category:
         if args.title:
             s = c.me.channel.status
@@ -974,9 +975,9 @@ if __name__ == "__main__":
 
     if args.activity or args.chat:
         if args.chat:
-            c = Client(scope="chat:read") if args.chat_read_only else Client(scope="chat:read chat:edit")
+            c = Client(scopes=["chat:read"]) if args.chat_read_only else Client(scopes=["chat:read", "chat:edit"])
         else:
-            c = Client(scope="")
+            c = Client(scopes=[])
 
         loop = asyncio.get_event_loop()
 
@@ -999,7 +1000,7 @@ if __name__ == "__main__":
             pass
         sys.exit(0)
 
-    c = Client(scope="user_follows_edit")
+    c = Client(scopes=["user_follows_edit"])
     run_default_action = True
 
     if args.follow:
