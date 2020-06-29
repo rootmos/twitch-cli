@@ -949,15 +949,20 @@ async def activity_feed(client, *channels):
                 payload = e["event"]["payload"]
                 if topic.startswith(follows_base_url):
                     ts = datetime.strptime(payload["followed_at"], "%Y-%m-%dT%H:%M:%S%z").astimezone()
-                    ts = ts.replace(tzinfo=None)
-                    d = ts.isoformat(timespec='seconds')
+                    d = ts.replace(tzinfo=None).isoformat(timespec='seconds')
                     f = payload["from_name"]
                     t = payload["to_name"]
                     print(f"{d} {f} followed {t}")
+                elif topic.startswith(streams_base_url) and payload["type"] == "live":
+                    ts = datetime.strptime(payload["started_at"], "%Y-%m-%dT%H:%M:%S%z").astimezone()
+                    d = ts.replace(tzinfo=None).isoformat(timespec='seconds')
+                    ch = payload["user_name"]
+                    t = payload["title"]
+                    print(f"{d} {ch} went live: {t}")
                 else:
-                    logger.warn(f"unhandled event: {e}")
+                    logger.warning(f"unhandled event: {e}")
             else:
-                logger.warn(f"unexpected message: {e}")
+                logger.warning(f"unexpected message: {e}")
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(add_help=False)
