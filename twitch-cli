@@ -595,6 +595,10 @@ def dmenu(choices, lines=20):
 def parse_args(args):
     default_path = Path("~/.twitch-cli").expanduser()
 
+    default_activity_events = ["live", "follow"]
+    default_notify_live_command = "notify-send --app-name=twitch 'channel %c went live'"
+    default_notify_follow_command = "notify-send --app-name=twitch '%u followed %c'"
+
     parser = argparse.ArgumentParser(description='Twitch command line interface')
     parser.add_argument("--following", help="print channels you're following", action="store_true")
     parser.add_argument("--menu", help="run dmenu", action="store_true")
@@ -605,14 +609,29 @@ def parse_args(args):
             help=f"create chat input channel at PATH/CHANNEL (default: ~/.twitch-cli/channel)")
     parser.add_argument("--chat-read-only", action="store_true", default=False, help="lurker mode")
     parser.add_argument("--chat-join-parts", action="store_true", default=False, help="display who joins and leaves the chat")
-    parser.add_argument("--activity", action="store_true", help="activity feed")
+    parser.add_argument("--activity", metavar="EVENTS", default=False, nargs="?",
+            help=f"activity feed (specify event types: {','.join(default_activity_events)})")
+    parser.add_argument("--activity-notify-live", metavar="COMMAND", default=False, nargs="?",
+            help=f"command to run when channel goes live (%%c replaced with channel name)")
+    parser.add_argument("--activity-notify-follow", metavar="COMMAND", default=False, nargs="?",
+            help=f"command to run when channel goes live (%%c is replaced with channel name, %%u with user name)")
     parser.add_argument("--follow", metavar="CHANNEL", action="append", help="follow CHANNEL (may be used multiple times)")
     parser.add_argument("--unfollow", metavar="CHANNEL", action="append", help="unfollow CHANNEL (may be used multiple times)")
     parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
     parser.add_argument('channels', metavar='CHANNEL', nargs='*',
                         help='channel to act on (defaults to followed channels)')
     parser.add_argument('--since', type=int, default=3, help='days to list videos')
-    return parser.parse_args(args)
+
+    args = parser.parse_args(args)
+
+    if args.activity_notify_live is None:
+        args.activity_notify_live = default_notify_live_command
+    if args.activity_notify_follow is None:
+        args.activity_notify_follow = default_notify_follow_command
+    if args.activity is None:
+        args.activity = default_activity_events
+
+    return args
 
 def parse_manager_args(args):
     parser = argparse.ArgumentParser(os.path.basename(sys.argv[0]) + " --manage", description='Twitch stream manager command line interface')
@@ -892,11 +911,11 @@ class Chat:
 
 
 import websockets
-async def activity_feed(client, *channels):
+async def activity_feed(client, args):
     base = "wss://ws.twitch.rootmos.io"
     url = base + "/sessions"
 
-    us = client.user(*channels)
+    us = client.user(args.channels)
 
     async with websockets.connect(url) as ws:
         session = json.loads(await ws.recv())["session"]
@@ -905,10 +924,11 @@ async def activity_feed(client, *channels):
         streams_base_url = "https://api.twitch.tv/helix/streams"
 
         for u in us:
-            topics = [
-                f"{follows_base_url}?first=1&to_id={u.user_id}",
-                f"{streams_base_url}?user_id={u.user_id}",
-            ]
+            topics = []
+            if "follow" in args.activity:
+                topics.append(f"{follows_base_url}?first=1&to_id={u.user_id}")
+            if "live" in args.activity:
+                topics.append(f"{streams_base_url}?user_id={u.user_id}")
 
             for t in topics:
                 logger.debug(f"subscribing to topic: {t}")
@@ -952,12 +972,20 @@ async def activity_feed(client, *channels):
                     d = ts.replace(tzinfo=None).isoformat(timespec='seconds')
                     f = payload["from_name"]
                     t = payload["to_name"]
+
+                    if args.activity_notify_follow:
+                        os.system(args.activity_notify_follow.replace("%c", t).replace("%u", f))
+
                     print(f"{d} {f} followed {t}")
                 elif topic.startswith(streams_base_url) and payload["type"] == "live":
                     ts = datetime.strptime(payload["started_at"], "%Y-%m-%dT%H:%M:%S%z").astimezone()
                     d = ts.replace(tzinfo=None).isoformat(timespec='seconds')
                     ch = payload["user_name"]
                     t = payload["title"]
+
+                    if args.activity_notify_live:
+                        os.system(args.activity_notify_live.replace("%c", t))
+
                     print(f"{d} {ch} went live: {t}")
                 else:
                     logger.warning(f"unhandled event: {e}")
@@ -987,15 +1015,15 @@ if __name__ == "__main__":
         loop = asyncio.get_event_loop()
 
         if args.activity:
-            loop.create_task(activity_feed(c, *args.channels))
+            loop.create_task(activity_feed(client=c, args=args))
 
         if args.chat:
             loop.create_task(Chat.run(
                 client = c,
+                channels = args.channels,
                 input_path = args.chat_input_path,
                 read_only = args.chat_read_only,
                 join_parts = args.chat_join_parts,
-                channels = args.channels,
                 )
             )
 

@@ -28,9 +28,11 @@ however it doesn't list videos (at the time of writing).
 ```
 usage: twitch-cli [-h] [--following] [--menu] [--json]
                   [--menu-lines MENU_LINES] [--chat] [--chat-input-path PATH]
-                  [--chat-read-only] [--chat-join-parts] [--activity]
-                  [--follow CHANNEL] [--unfollow CHANNEL]
-                  [--title-max-length TITLE_MAX_LENGTH] [--since SINCE]
+                  [--chat-read-only] [--chat-join-parts] [--activity [EVENTS]]
+                  [--activity-notify-live [COMMAND]]
+                  [--activity-notify-follow [COMMAND]] [--follow CHANNEL]
+                  [--unfollow CHANNEL] [--title-max-length TITLE_MAX_LENGTH]
+                  [--since SINCE]
                   [CHANNEL [CHANNEL ...]]
 
 Twitch command line interface
@@ -51,7 +53,13 @@ optional arguments:
                         ~/.twitch-cli/channel)
   --chat-read-only      lurker mode
   --chat-join-parts     display who joins and leaves the chat
-  --activity            activity feed
+  --activity [EVENTS]   activity feed (specify event types: live,follow)
+  --activity-notify-live [COMMAND]
+                        command to run when channel goes live (%c replaced
+                        with channel name)
+  --activity-notify-follow [COMMAND]
+                        command to run when channel goes live (%c is replaced
+                        with channel name, %u with user name)
   --follow CHANNEL      follow CHANNEL (may be used multiple times)
   --unfollow CHANNEL    unfollow CHANNEL (may be used multiple times)
   --title-max-length TITLE_MAX_LENGTH
