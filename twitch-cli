@@ -618,9 +618,10 @@ def parse_args(args):
     parser.add_argument("--follow", metavar="CHANNEL", action="append", help="follow CHANNEL (may be used multiple times)")
     parser.add_argument("--unfollow", metavar="CHANNEL", action="append", help="unfollow CHANNEL (may be used multiple times)")
     parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
-    parser.add_argument('channels', metavar='CHANNEL', nargs='*',
-                        help='channel to act on (defaults to followed channels)')
-    parser.add_argument('--since', type=int, default=3, help='days to list videos')
+    parser.add_argument("channels", metavar="CHANNEL", nargs="*",
+                        help="channel to act on (defaults to followed channels)")
+    parser.add_argument("--since", type=int, default=3, help="days to list videos")
+    parser.add_argument("--live", action="store_true", help="list only live streams (synonym for --since=0)")
 
     args = parser.parse_args(args)
 
@@ -630,6 +631,9 @@ def parse_args(args):
         args.activity_notify_follow = default_notify_follow_command
     if args.activity is None:
         args.activity = default_activity_events
+
+    if args.live:
+        args.since = 0
 
     return args
 

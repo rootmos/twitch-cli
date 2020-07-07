@@ -32,7 +32,7 @@ usage: twitch-cli [-h] [--following] [--menu] [--json]
                   [--activity-notify-live [COMMAND]]
                   [--activity-notify-follow [COMMAND]] [--follow CHANNEL]
                   [--unfollow CHANNEL] [--title-max-length TITLE_MAX_LENGTH]
-                  [--since SINCE]
+                  [--since SINCE] [--live]
                   [CHANNEL [CHANNEL ...]]
 
 Twitch command line interface
@@ -65,6 +65,7 @@ optional arguments:
   --title-max-length TITLE_MAX_LENGTH
                         maximum length of printed titles
   --since SINCE         days to list videos
+  --live                list only live streams (synonym for --since=0)
 ```
 ### Stream manager
 ```
