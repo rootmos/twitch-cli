@@ -184,33 +184,26 @@ def new_token(scope):
 
     return token
 
-def get_token(scopes):
-    p = Path("~/.twitch-cli.json").expanduser()
-    if p.exists():
-        with p.open() as f: s = json.loads(f.read())
-    else:
-        s = {}
-
-    if "tokens" not in s: s["tokens"] = {}
-
-    scope = " ".join(sorted(scopes))
-    if scope not in s["tokens"]:
-        s["tokens"][scope] = new_token(scope)
-        with p.open("w") as f: f.write(json.dumps(s))
-
-    return s["tokens"][scope]
-
 # the client
 
 class Client:
-    def __init__(self, scopes=None, token=None):
+    def __init__(self, token):
         self._me = None
-        if token is not None:
-            self.token = token
-        elif scopes is not None:
-            self.token = get_token(scopes)
+        self.token = token
+
+    @staticmethod
+    def fetch_token(scopes, token_path):
+        if token_path.exists():
+            with token_path.open() as f: s = json.loads(f.read())
         else:
-            raise ValueError("specify either token or scopes")
+            s = {}
+
+        scope = " ".join(sorted(scopes))
+        if scope not in s:
+            s[scope] = new_token(scope)
+            with token_path.open("w") as f: f.write(json.dumps(s))
+
+        return s[scope]
 
     @property
     def me(self):
@@ -592,61 +585,6 @@ def dmenu(choices, lines=20):
         vs.append(d[l])
     return vs
 
-def parse_args(args):
-    default_path = Path("~/.twitch-cli").expanduser()
-
-    default_activity_events = ["live", "follow"]
-    default_notify_live_command = "notify-send --app-name=twitch '%c went live' '%t'"
-    default_notify_follow_command = "notify-send --app-name=twitch '%u followed %c'"
-
-    parser = argparse.ArgumentParser(description='Twitch command line interface')
-    parser.add_argument("--following", help="print channels you're following", action="store_true")
-    parser.add_argument("--menu", help="run dmenu", action="store_true")
-    parser.add_argument("--json", help="output json", action="store_true")
-    parser.add_argument("--menu-lines", type=int, default=20, help="number of maximum lines in the menu")
-    parser.add_argument("--chat", action="store_true", help="interact with chat")
-    parser.add_argument("--chat-input-path", metavar="PATH", default=default_path/"channel",
-            help=f"create chat input channel at PATH/CHANNEL (default: ~/.twitch-cli/channel)")
-    parser.add_argument("--chat-read-only", action="store_true", default=False, help="lurker mode")
-    parser.add_argument("--chat-join-parts", action="store_true", default=False, help="display who joins and leaves the chat")
-    parser.add_argument("--activity", metavar="EVENTS", default=False, nargs="?",
-            help=f"activity feed (specify event types: {','.join(default_activity_events)})")
-    parser.add_argument("--activity-notify-live", metavar="COMMAND", default=False, nargs="?",
-            help=f"command to run when channel goes live (%%c replaced with channel name, %%t with the stream title)")
-    parser.add_argument("--activity-notify-follow", metavar="COMMAND", default=False, nargs="?",
-            help=f"command to run when channel goes live (%%c is replaced with channel name, %%u with user name)")
-    parser.add_argument("--follow", metavar="CHANNEL", action="append", help="follow CHANNEL (may be used multiple times)")
-    parser.add_argument("--unfollow", metavar="CHANNEL", action="append", help="unfollow CHANNEL (may be used multiple times)")
-    parser.add_argument("--title-max-length", type=int, default=80, help="maximum length of printed titles")
-    parser.add_argument("channels", metavar="CHANNEL", nargs="*",
-                        help="channel to act on (defaults to followed channels)")
-    parser.add_argument("--since", type=int, default=3, help="days to list videos")
-    parser.add_argument("--live", action="store_true", help="list only live streams (synonym for --since=0)")
-
-    args = parser.parse_args(args)
-
-    if args.activity_notify_live is None:
-        args.activity_notify_live = default_notify_live_command
-    if args.activity_notify_follow is None:
-        args.activity_notify_follow = default_notify_follow_command
-    if args.activity is None:
-        args.activity = default_activity_events
-
-    if args.live:
-        args.since = 0
-
-    return args
-
-def parse_manager_args(args):
-    parser = argparse.ArgumentParser(os.path.basename(sys.argv[0]) + " --manage", description='Twitch stream manager command line interface')
-    parser.add_argument("--title", action="store_true", help="print stream title")
-    parser.add_argument("--set-title", metavar="TITLE", help="set stream title")
-    parser.add_argument("--edit-title", action="store_true", help="edit stream title using $EDITOR")
-    parser.add_argument("--category", action="store_true", help="print stream category")
-    parser.add_argument("--set-category", metavar="CATEGORY", help="set stream category")
-    parser.add_argument("--json", help="output json", action="store_true")
-    return parser.parse_args(args)
-
 def edit(v):
     with tempfile.NamedTemporaryFile() as f:
         f.write(bytes(v, "UTF-8"))
@@ -660,42 +598,6 @@ def edit(v):
 
         f.seek(0)
         return str(f.read(), "UTF-8")
-
-
-def run_manager(args):
-    c = None
-    run_default_action = True
-
-    if args.edit_title:
-        c = c or Client(scopes=["channel_editor"])
-        c.me.channel.status = edit(c.me.channel.status)
-        run_default_action = False
-
-    if args.set_title is not None:
-        c = c or Client(scopes=["channel_editor"])
-        c.me.channel.status = args.set_title
-        run_default_action = False
-
-    if args.set_category is not None:
-        c = c or Client(scopes=["channel_editor"])
-        c.me.channel.game = args.set_category
-        run_default_action = False
-
-    c = c or Client(scopes=[])
-    if args.title or args.category:
-        if args.title:
-            s = c.me.channel.status
-            print(json.dumps(s) if args.json else s)
-        if args.category:
-            s = c.me.channel.game
-            print(json.dumps(s) if args.json else s)
-    elif run_default_action:
-        d = c.me.channel.to_dict()
-        if args.json:
-            print(json.dumps(d))
-        else:
-            for k, v in d.items():
-                print(f"{k}: {v}")
 
 class IRCMessage:
     def __init__(self, bs):
@@ -929,9 +831,9 @@ async def activity_feed(client, args):
 
         for u in us:
             topics = []
-            if "follow" in args.activity:
+            if "follow" in args.event:
                 topics.append(f"{follows_base_url}?first=1&to_id={u.user_id}")
-            if "live" in args.activity:
+            if "live" in args.event:
                 topics.append(f"{streams_base_url}?user_id={u.user_id}")
 
             for t in topics:
@@ -977,8 +879,10 @@ async def activity_feed(client, args):
                     f = payload["from_name"]
                     t = payload["to_name"]
 
-                    if args.activity_notify_follow:
-                        os.system(args.activity_notify_follow.replace("%c", t).replace("%u", f))
+                    if args.notify_follow:
+                        cmd = args.notify_follow.replace("%c", t).replace("%u", f)
+                        logger.debug(f"running notify follow hook: {cmd}")
+                        os.system(cmd)
 
                     print(f"{d} {f} followed {t}")
                 elif topic.startswith(streams_base_url) and payload["type"] == "live":
@@ -987,8 +891,10 @@ async def activity_feed(client, args):
                     ch = payload["user_name"]
                     t = payload["title"]
 
-                    if args.activity_notify_live:
-                        os.system(args.activity_notify_live.replace("%c", ch).replace("%t", t))
+                    if args.notify_live:
+                        cmd = args.notify_live.replace("%c", ch).replace("%t", t)
+                        logger.debug(f"running notify follow hook: {cmd}")
+                        os.system(cmd)
 
                     print(f"{d} {ch} went live: {t}")
                 else:
@@ -996,58 +902,165 @@ async def activity_feed(client, args):
             else:
                 logger.warning(f"unexpected message: {e}")
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Twitch command line interface")
+    subparsers = parser.add_subparsers(help="sub-commands", dest='command')
+
+    default_config_path = "~/.twitch-cli"
+    default_activity_events = ["live", "follow"]
+    default_notify_live_command = "notify-send --app-name=twitch '%c went live' '%t'"
+    default_notify_follow_command = "notify-send --app-name=twitch '%u followed %c'"
+
+    parser.add_argument("--log", default="WARN", help="set log level")
+    parser.add_argument("--config-path", metavar="CONFIG_PATH", help=f"configuration base path (default: {default_config_path})")
+    parser.add_argument("--token-path", help=f"token path (default: CONFIG_PATH/tokens.json)")
+
+    def add_json_argument(p):
+        p.add_argument("--json", help="output json", action="store_true")
+    def add_menu_argument(p):
+        p.add_argument("--menu", help="run dmenu", action="store_true")
+        p.add_argument("--menu-lines", type=int, default=20,
+                help="number of maximum lines in the menu")
+
+    activity = subparsers.add_parser("activity", help="activity feed")
+    activity.add_argument("channels", metavar="CHANNEL", nargs="+",
+            help="follow activity feed of CHANNEL")
+    activity.add_argument("--event", metavar="EVENT", default=default_activity_events, nargs="*",
+            help=f"event types: {','.join(default_activity_events)}")
+    activity.add_argument("--notify-live", metavar="COMMAND", default=False, nargs="?",
+            help=f"command to run when channel goes live (%%c replaced with channel name, %%t with the stream title)")
+    activity.add_argument("--notify-follow", metavar="COMMAND", default=False, nargs="?",
+            help=f"command to run when channel goes live (%%c is replaced with channel name, %%u with user name)")
+
+    follow = subparsers.add_parser("follow", help="follow channel(s)")
+    follow.add_argument("channels", metavar="CHANNEL", nargs="+", help="follow CHANNEL")
+
+    unfollow = subparsers.add_parser("unfollow", help="unfollow user(s)")
+    unfollow.add_argument("channels", metavar="CHANNEL", nargs="+", help="unfollow CHANNEL")
+
+    following = subparsers.add_parser("following", help="list followed users")
+    add_json_argument(following)
+    add_menu_argument(following)
+
+    list_parser = subparsers.add_parser("list", aliases=["live"], help="list live streams and videos (default)")
+    list_parser.add_argument("channels", metavar="CHANNEL", nargs="*",
+            help="list streams and videos of CHANNEL (defaults to followed channels)")
+    list_parser.add_argument("--live", action="store_true", help="list only live streams (synonym for --since=0)")
+    list_parser.add_argument("--since", type=int, default=3, help="days to list videos")
+    list_parser.add_argument("--exclude", metavar="PATH",
+            help=f"exclude channel if it appears in the specified file (default: CONFIG_PATH/exclude)")
+    list_parser.add_argument("--title-max-length", type=int, default=80,
+            help="maximum length of printed titles")
+    add_json_argument(list_parser)
+    add_menu_argument(list_parser)
+
+    chat = subparsers.add_parser("chat", help="interact with chat")
+    chat.add_argument("channels", metavar="CHANNEL", nargs="*",
+            help="join CHANNEL's chat")
+    chat.add_argument("--input-path", metavar="PATH",
+            help=f"create chat input channel at PATH/CHANNEL (default: CONFIG_PATH/channel)")
+    chat.add_argument("--read-only", action="store_true", default=False,
+            help="lurker mode")
+    chat.add_argument("--join-parts", action="store_true", default=False,
+            help="display who joins and leaves the chat")
+
+    stream = subparsers.add_parser("stream", help="manage stream")
+    stream_actions = stream.add_subparsers(help="management actions", dest='stream_action')
+
+    title_parser = stream_actions.add_parser("title", help="print stream title")
+    add_json_argument(title_parser)
+
+    set_title_parser = stream_actions.add_parser("set-title", help="set stream title")
+    set_title_parser.add_argument("title", metavar="TITLE", help="set stream title to TITLE")
+
+    edit_title_parser = stream_actions.add_parser("edit-title", help="edit stream title using $EDITOR")
+
+    category_parser = stream_actions.add_parser("category", help="print stream category")
+    add_json_argument(category_parser)
+
+    set_category_parser = stream_actions.add_parser("set-category", help="set stream category")
+    set_category_parser.add_argument("category", metavar="CATEGORY", help="set stream category to CATEGORY")
+
+    edit_category_parser = stream_actions.add_parser("edit-category", help="edit stream category using $EDITOR")
+
+    status_parser = stream_actions.add_parser("status", help="print stream status")
+    add_json_argument(status_parser)
+
+    args = parser.parse_args()
+
+    if args.config_path is None:
+        args.config_path = Path(default_config_path).expanduser()
+
+    if args.token_path is None:
+        args.token_path = args.config_path / "tokens.json"
+
+    if args.command is None:
+        args.command = "list"
+
+    if args.command == "live":
+        args.command = "list"
+        args.since = 0
+
+    if args.command == "list":
+        if args.exclude is None:
+            args.exclude = args.config_path / "exclude"
+
+    if args.command == "chat":
+        if args.input_path is None:
+            args.input_path = args.config_path / "channel"
+
+    if args.command == "activity":
+        if args.notify_live is None:
+            args.notify_live = default_notify_live_command
+
+        if args.notify_follow is None:
+            args.notify_follow = default_notify_follow_command
+
+    return args
+
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(add_help=False)
-    p.add_argument("--manage", action="store_true")
-    p.add_argument("--log", default="WARN")
-    (a, args) = p.parse_known_args()
+    args = parse_args()
+    logger = setup_logger(args.log.upper())
 
-    logger = setup_logger(a.log.upper())
+    scopes = []
+    if args.command in ["follow", "unfollow"]:
+        scopes.append("user_follows_edit")
+    if args.command == "chat":
+        scopes.append("chat:read")
+        if not args.read_only:
+            scopes.append("chat:edit")
+    if args.command == "stream":
+        if args.stream_action in ["set-title", "edit-title", "set-category", "edit-category"]:
+            scopes.append("channel_editor")
+    c = Client(token=Client.fetch_token(scopes=scopes, token_path=args.token_path))
 
-    if a.manage:
-        run_manager(parse_manager_args(args))
-        sys.exit(0)
-    else:
-        args = parse_args(args)
-
-    if args.activity or args.chat:
-        if args.chat:
-            c = Client(scopes=["chat:read"]) if args.chat_read_only else Client(scopes=["chat:read", "chat:edit"])
-        else:
-            c = Client(scopes=[])
-
+    if args.command == "activity" or args.command == "chat":
         loop = asyncio.get_event_loop()
 
-        if args.activity:
+        # TODO: make it possible to run both acivity and chat (how to handle the options nicely?)
+        if args.command == "activity":
             loop.create_task(activity_feed(client=c, args=args))
 
-        if args.chat:
+        if args.command == "chat":
             loop.create_task(Chat.run(
                 client = c,
                 channels = args.channels,
-                input_path = args.chat_input_path,
-                read_only = args.chat_read_only,
-                join_parts = args.chat_join_parts,
+                input_path = args.input_path,
+                read_only = args.read_only,
+                join_parts = args.join_parts,
                 )
             )
 
         try:
             loop.run_forever()
         except KeyboardInterrupt:
-            pass
-        sys.exit(0)
-
-    c = Client(scopes=["user_follows_edit"])
-    run_default_action = True
-
-    if args.follow:
+            logger.debug("received keyboard interrupt: stopping")
+            loop.stop()
+    elif args.command == "follow":
         c.follow(*args.follow)
-        run_default_action = False
-    if args.unfollow:
+    elif args.command == "unfollow":
         c.unfollow(*args.unfollow)
-        run_default_action = False
-
-    if args.following:
+    elif args.command == "following":
         fs = c.me.following()
         if args.menu:
             for c in dmenu([f.user_name for f in fs], lines=args.menu_lines): print(c)
@@ -1057,39 +1070,68 @@ if __name__ == "__main__":
             else:
                 for f in fs: print(f.user_name)
         run_default_action = False
+    elif args.command == "list":
+        if args.exclude is not None and os.path.exists(args.exclude):
+            with open(args.exclude, "r") as f:
+                logger.debug(f"excluding channels listed in: {f.name}")
+                exclude = [ l.strip().lower() for l in f ]
+                logger.debug(f"excluding channels: {exclude}")
+        else:
+            exclude = []
 
-    if not run_default_action:
-        sys.exit(0)
+        if len(args.channels) > 0:
+            fs = c.user(args.channels)
+        else:
+            fs = filter(lambda f: f.user_name.lower() not in exclude, c.me.following())
 
-    if len(args.channels) > 0:
-        fs = c.user(args.channels)
+        vs = []
+        if args.since is not None and args.since != 0:
+            since = datetime.now(timezone.utc) - timedelta(days=args.since)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
+                for f in [ ex.submit(lambda f: f.videos(since=since), f) for f in fs ]:
+                    vs += f.result()
+            vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
+
+        if args.json:
+            for v in vs: print(json.dumps(v.to_dict()))
+            sys.exit(0)
+
+        def clean_title(t):
+            t = t.replace('\n', ' ')
+            t = t.encode("ascii", "ignore")
+            return str(t[:args.title_max_length], "ascii")
+
+        choices = []
+        for s in c.streams(fs):
+            choices.append(((s.user.user_name, "", "", clean_title(s.title)), s.url))
+        for v in vs:
+            choices.append(((v.user.user_name, render_duration(v.duration), v.typ[0], clean_title(v.title)), v.url))
+
+        if args.menu:
+            for c in dmenu(choices, lines=args.menu_lines): print(c)
+        else:
+            for l in tabularize([r for (r, u) in choices]): print(l)
+
+    elif args.command == "stream" and args.stream_action == "set-title":
+        c.me.channel.status = args.title
+    elif args.command == "stream" and args.stream_action == "edit-title":
+        c.me.channel.status = edit(c.me.channel.status)
+    elif args.command == "stream" and args.stream_action == "set-category":
+        c.me.channel.game = args.category
+    elif args.command == "stream" and args.stream_action == "edit-category":
+        c.me.channel.game = edit(c.me.channel.game)
+    elif args.command == "stream" and args.stream_action == "title":
+        s = c.me.channel.status
+        print(json.dumps(s) if args.json else s)
+    elif args.command == "stream" and args.stream_action == "category":
+        s = c.me.channel.game
+        print(json.dumps(s) if args.json else s)
+    elif args.command == "stream" and args.stream_action == "status":
+        d = c.me.channel.to_dict()
+        if args.json:
+            print(json.dumps(d))
+        else:
+            for k, v in d.items():
+                print(f"{k}: {v}")
     else:
-        fs = c.me.following()
-
-    vs = []
-    if args.since is not None and args.since != 0:
-        since = datetime.now(timezone.utc) - timedelta(days=args.since)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
-            for f in [ ex.submit(lambda f: f.videos(since=since), f) for f in fs ]:
-                vs += f.result()
-        vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
-
-    if args.json:
-        for v in vs: print(json.dumps(v.to_dict()))
-        sys.exit(0)
-
-    def clean_title(t):
-        t = t.replace('\n', ' ')
-        t = t.encode("ascii", "ignore")
-        return str(t[:args.title_max_length], "ascii")
-
-    choices = []
-    for s in c.streams(fs):
-        choices.append(((s.user.user_name, "", "", clean_title(s.title)), s.url))
-    for v in vs:
-        choices.append(((v.user.user_name, render_duration(v.duration), v.typ[0], clean_title(v.title)), v.url))
-
-    if args.menu:
-        for c in dmenu(choices, lines=args.menu_lines): print(c)
-    else:
-        for l in tabularize([r for (r, u) in choices]): print(l)
+        logger.error(f"unhandled command: {args.command}")

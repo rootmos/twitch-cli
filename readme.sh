@@ -26,7 +26,7 @@ The menu option makes for a simple Twitch GUI when paired
 with a media player that support Twitch URLs
 (I recommend [mpv](https://mpv.io/) and [youtube-dl](https://youtube-dl.org/)).
 \`\`\`shell
-$TARGET --menu | xargs mpv
+$TARGET list --menu | xargs mpv
 \`\`\`
 
 For a more sophisticated/klickety-klick GUI check out:
@@ -34,17 +34,16 @@ For a more sophisticated/klickety-klick GUI check out:
 however it doesn't list videos (at the time of writing).
 
 ## Usage
-\`\`\`
 EOF
-$TARGET -h 2>&1 | tee -a "$OUT"
 
-cat <<EOF | tee -a "$OUT"
-\`\`\`
-### Stream manager
-\`\`\`
-EOF
-$TARGET --manage -h 2>&1 | tee -a "$OUT"
+echo '```' | tee -a "$OUT"
+$TARGET --help 2>&1 | tee -a "$OUT"
+echo '```' | tee -a "$OUT"
 
-cat <<EOF | tee -a "$OUT"
-\`\`\`
-EOF
+for CMD in "list" "chat" "activity" "stream"; do
+  echo | tee -a "$OUT"
+  echo "### $CMD" | tee -a "$OUT"
+  echo '```' | tee -a "$OUT"
+  $TARGET "$CMD" --help 2>&1 | tee -a "$OUT"
+  echo '```' | tee -a "$OUT"
+done
