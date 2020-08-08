@@ -987,15 +987,14 @@ def parse_args():
     add_json_argument(status_parser)
 
     args = parser.parse_args()
+    if args.command is None:
+        args = parser.parse_args(["list"])
 
     if args.config_path is None:
         args.config_path = Path(default_config_path).expanduser()
 
     if args.token_path is None:
         args.token_path = args.config_path / "tokens.json"
-
-    if args.command is None:
-        args.command = "list"
 
     if args.command == "live":
         args.command = "list"
@@ -1004,6 +1003,9 @@ def parse_args():
     if args.command == "list":
         if args.exclude is None:
             args.exclude = args.config_path / "exclude"
+
+        if args.live:
+            args.since = 0
 
     if args.command == "chat":
         if args.input_path is None:
@@ -1082,7 +1084,7 @@ if __name__ == "__main__":
         if len(args.channels) > 0:
             fs = c.user(args.channels)
         else:
-            fs = filter(lambda f: f.user_name.lower() not in exclude, c.me.following())
+            fs = list(filter(lambda f: f.user_name.lower() not in exclude, c.me.following()))
 
         vs = []
         if args.since is not None and args.since != 0:
@@ -1093,7 +1095,7 @@ if __name__ == "__main__":
             vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
 
         if args.json:
-            for v in vs: print(json.dumps(v.to_dict()))
+            print(json.dumps([v.to_dict() for v in vs ]))
             sys.exit(0)
 
         def clean_title(t):

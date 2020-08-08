@@ -16,7 +16,7 @@ cat <<EOF | tee "$OUT"
   videos or streams
 * manage stream metadata: title, category
 * lurk in chat or interact using per channel unix sockets:
-  - \`twitch-cli --chat rootmos2\` in one terminal and
+  - \`twitch-cli chat rootmos2\` in one terminal and
     \`socat readline unix:~/.twitch-cli/channel/rootmos2\` in another
     ([tmux](https://tmux.github.io/) sounds perfect for this, no?)
 * follow channels activity: follows and stream up/down events
