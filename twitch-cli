@@ -1059,9 +1059,9 @@ if __name__ == "__main__":
             logger.debug("received keyboard interrupt: stopping")
             loop.stop()
     elif args.command == "follow":
-        c.follow(*args.follow)
+        c.follow(*args.channels)
     elif args.command == "unfollow":
-        c.unfollow(*args.unfollow)
+        c.unfollow(*args.channels)
     elif args.command == "following":
         fs = c.me.following()
         if args.menu:
