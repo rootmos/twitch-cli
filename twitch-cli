@@ -32,6 +32,7 @@ redirect_uri = f"http://{redirect_host}:{redirect_port}{redirect_path}"
 
 helix_url = "https://api.twitch.tv/helix"
 kraken_url = "https://api.twitch.tv/kraken"
+v5_url = "https://api.twitch.tv/v5"
 oauth2_url = "https://id.twitch.tv/oauth2"
 irc_addr = ("irc.chat.twitch.tv", 6697)
 
@@ -278,7 +279,7 @@ class Client:
         r = requests.post(url, json=body, headers=h)
         r.raise_for_status()
 
-    def get(self, url, params=None, kraken=False):
+    def get(self, url, params=None, kraken=False, v5=False):
         if kraken:
             url = kraken_url + url
             h = {
@@ -286,6 +287,11 @@ class Client:
                 "Client-ID": client_id,
                 "Accept": "application/vnd.twitchtv.v5+json",
             }
+        elif v5:
+            url = v5_url + url
+            params = params or {}
+            params["client_id"] = client_id
+            h = None
         else:
             url = helix_url + url
             h = {
@@ -360,11 +366,26 @@ class Client:
 
         self.post(f"/webhooks/hub", body=body)
 
+    def comments(self, video_id):
+        cs = []
+        p = {"limit": 100}
+        while True:
+            j = self.get(f"/videos/{video_id}/comments", v5=True, params=p)
+            for c in j["comments"]:
+                c = Comment.from_twitch_json(self, c)
+                cs.append(c)
+
+            if "_next" not in j: break
+            p["cursor"] = j["_next"]
+            logger.debug(f"comments fetching progress: video_id={video_id} n={len(cs)}")
+        return cs
+
 class User:
-    def __init__(self, client, user_id, user_name, title=None):
+    def __init__(self, client, user_id, user_name, bio=None):
         self.client = client
         self.user_id = user_id
         self.user_name = user_name
+        self.bio = bio
         self._channel = None
 
     def __str__(self):
@@ -377,6 +398,8 @@ class User:
     def from_twitch_json(client, j):
         if "login" in j:
             return User(client, user_id=j["id"], user_name=j["login"])
+        elif "_id" in j:
+            return User(client, user_id=j["_id"], user_name=j["display_name"], bio=j["bio"])
         else:
             return User(client, user_id=j["user_id"], user_name=j["user_name"])
 
@@ -540,10 +563,32 @@ class Stream:
     def url(self):
         return f"https://twitch.tv/{self.user.user_name}"
 
+    @staticmethod
     def from_twitch_json(client, j):
         return Stream(client,
             title=j["title"],
             user=User.from_twitch_json(client, j),
+        )
+
+class Comment:
+    def __init__(self, client, comment_id, user, created_at, offset, body):
+        self.client = client
+        self.comment_id = comment_id
+        self.user = user
+        self.created_at = created_at
+        self.offset = offset
+        self.body = body
+
+    @staticmethod
+    def from_twitch_json(client, j):
+        offset = j["content_offset_seconds"]
+        return Comment(
+            client = client,
+            comment_id = j["_id"],
+            user = User.from_twitch_json(client, j["commenter"]),
+            created_at = dateutil.parser.isoparse(j["created_at"]),
+            offset = offset,
+            body = j["message"]["body"],
         )
 
 def tabularize(rows, pad=" ", sep=" "):
@@ -986,6 +1031,11 @@ def parse_args():
     status_parser = stream_actions.add_parser("status", help="print stream status")
     add_json_argument(status_parser)
 
+    comments = subparsers.add_parser("comments", help="download comments")
+    comments.add_argument("video", metavar="VIDEO", nargs=1, help="fetch comments of VIDEO")
+    comments.add_argument("--duration", type=float, default=10.0, help="comment display duration")
+    comments.add_argument("--output", help="save to file instead of stdout")
+
     args = parser.parse_args()
     if args.command is None:
         args = parser.parse_args(["list"])
@@ -1135,5 +1185,23 @@ if __name__ == "__main__":
         else:
             for k, v in d.items():
                 print(f"{k}: {v}")
+    elif args.command == "comments":
+        vid = args.video[0]
+        def fmt(td):
+            h = int(td/3600); td -= h*3600
+            m = int(td/60); td -= m*60
+            s = int(td); td -= s
+            ms = int(td*1000)
+            return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+        if args.output is None:
+            f = sys.stdout
+        else:
+            f = open(args.output, "w")
+
+        for i, c in enumerate(c.comments(vid)):
+            f.write(f"{i}\n")
+            f.write(f"{fmt(c.offset)} --> {fmt(c.offset + args.duration)}\n")
+            f.write(f"{c.user.user_name}: {c.body}\n\n")
     else:
         logger.error(f"unhandled command: {args.command}")
