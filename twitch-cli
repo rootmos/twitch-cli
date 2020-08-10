@@ -191,6 +191,7 @@ class Client:
     def __init__(self, token):
         self._me = None
         self.token = token
+        self._channels = {}
 
     @staticmethod
     def fetch_token(scopes, token_path):
@@ -342,8 +343,10 @@ class Client:
 
         return us
 
-    def channel(self, id):
-        return Channel.from_twitch_json(self, self.get(f"/channels/{id}", kraken=True))
+    def channel(self, channel_id):
+        if id not in self._channels:
+            self._channels[channel_id] = Channel.from_twitch_json(self, self.get(f"/channels/{channel_id}", kraken=True))
+        return self._channels[channel_id]
 
     def follow(self, *channels):
         for u in self.user(*channels):
@@ -379,6 +382,17 @@ class Client:
             p["cursor"] = j["_next"]
             logger.debug(f"comments fetching progress: video_id={video_id} n={len(cs)}")
         return cs
+
+    def video(self, *video_ids):
+        vs = []
+        while len(video_ids) > 0:
+            p = { "id": video_ids[:100], "first": 100, "sort": "time" }
+            j = self.get("/videos", params=p)
+            for i in j["data"]:
+                vs.append(Video.from_twitch_json(self, i))
+
+            video_ids = video_ids[100:]
+        return vs
 
 class User:
     def __init__(self, client, user_id, user_name, bio=None):
@@ -442,9 +456,10 @@ class User:
         return vs
 
 class Channel:
-    def __init__(self, client, channel_id, status, game, followers, views):
+    def __init__(self, client, channel_id, channel_name, status, game, followers, views):
         self.client = client
         self.channel_id = channel_id
+        self.channel_name = channel_name
         self._status = status
         self._game = game
         self.followers = followers
@@ -478,6 +493,7 @@ class Channel:
     def from_twitch_json(client, j):
         return Channel(client,
             channel_id = j["_id"],
+            channel_name = j["name"],
             status = j["status"],
             game = j["game"],
             followers = j["followers"],
@@ -504,12 +520,19 @@ class Video:
         self.published_at = published_at
         self.duration = duration
         self.typ = typ
+        self._comments = None
 
     def __str__(self):
         return self.title
 
     def __repr__(self):
         return f"{self.user.user_name}: {self.title} ({self.video_id})"
+
+    @property
+    def comments(self):
+        if self._comments is None:
+            self._comments = self.client.comments(self.video_id)
+        return self._comments
 
     def from_twitch_json(client, j):
         if "created_at" in j and j["created_at"] is not None:
@@ -571,13 +594,18 @@ class Stream:
         )
 
 class Comment:
-    def __init__(self, client, comment_id, user, created_at, offset, body):
+    def __init__(self, client, body, channel=None, channel_name=None, comment_id=None, user=None, created_at=None, offset=None):
         self.client = client
         self.comment_id = comment_id
         self.user = user
-        self.created_at = created_at
+        self.created_at = created_at or datetime.now(timezone.utc)
         self.offset = offset
         self.body = body
+        self.channel = channel
+        if self.channel is not None:
+            self.channel_name = self.channel.channel_name
+        else:
+            self.channel_name = channel_name
 
     @staticmethod
     def from_twitch_json(client, j):
@@ -589,7 +617,21 @@ class Comment:
             created_at = dateutil.parser.isoparse(j["created_at"]),
             offset = offset,
             body = j["message"]["body"],
+            channel = client.channel(j["channel_id"]),
         )
+
+    def srt(self, i, duration):
+        def fmt(td):
+            h = int(td/3600); td -= h*3600
+            m = int(td/60); td -= m*60
+            s = int(td); td -= s
+            ms = int(td*1000)
+            return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+        s  = f"{i}\n"
+        s += f"{fmt(self.offset)} --> {fmt(self.offset + duration)}\n"
+        s += f"{self.user.user_name}: {self.body}\n\n"
+        return s
 
 def tabularize(rows, pad=" ", sep=" "):
     if len(rows) == 0:
@@ -703,11 +745,16 @@ class IRCMessage:
         return IRCMessage.__parse_tag(s[m.end(0):], acc)
 
 class Chat:
-    def __init__(self, client, channels, reader, writer):
+    def __init__(self, client, channels, reader, writer, output, subtitles, start, duration):
         self.client = client
         self.reader = reader
         self.writer = writer
         self.queue = asyncio.Queue()
+        self.output = output
+        self._print_comment = self._write_subtitle if subtitles else self._write_plain
+        self.start = start
+        self.comments_count = 0
+        self.duration = duration
 
         if len(channels) == 0:
             self.channels = [ self.client.me.user_name ]
@@ -736,24 +783,31 @@ class Chat:
                 l = str(l[:-1], "UTF-8")
                 logger.debug(f"sending chat line to {channel}: {l}")
                 await self.send_line(f"PRIVMSG #{channel} :{l}")
-                await self._print_line(datetime.now(), self.client.me.user_name, channel, l)
+                await self._print_comment(Comment(user=self.client.me, channel_name=channel, body=l))
             logger.debug(f"client disconnected for chat input to {channel}")
 
         await asyncio.start_unix_server(go, path)
 
-    async def _print_line(self, timestamp, user, channel, msg):
-        d = timestamp.isoformat(timespec='seconds')
+    async def _write_plain(self, comment):
+        self.comments_count += 1
+        d = comment.created_at.isoformat(timespec='seconds')
 
-        if user is None:
+        if comment.user is None:
             if len(self.channels) > 1:
-                print(f"{d} {channel} {msg}")
+                self.output.write(f"{d} {comment.channel_name} {comment.body}\n")
             else:
-                print(f"{d} {msg}")
+                self.output.write(f"{d} {comment.body}\n")
         else:
             if len(self.channels) > 1:
-                print(f"{d} {channel} {user}: {msg}")
+                self.output.write(f"{d} {comment.channel_name} {comment.user.user_name}: {comment.body}\n")
             else:
-                print(f"{d} {user}: {msg}")
+                self.output.write(f"{d} {comment.user.user_name}: {comment.body}\n")
+        self.output.flush()
+
+    async def _write_subtitle(self, comment):
+        self.comments_count += 1
+        self.output.write(comment.srt(self.comments_count, self.duration))
+        self.output.flush()
 
     @staticmethod
     def extract_user_name_from_prefix(p):
@@ -777,9 +831,10 @@ class Chat:
 
         for c, (j, l) in diffs.items():
             if len(j) > 0:
-                await self._print_line(datetime.now(), None, c, "joined: " + " ".join(j))
+                body = "joined: " + " ".join(j)
             if len(l) > 0:
-                await self._print_line(datetime.now(), None, c, "left: " + " ".join(l))
+                body = "left: " + " ".join(l)
+            await self._print_comment(Comment(self.client, channel_name=c, body=body))
 
     async def _handle_message(self, msg, join_parts=False):
         if msg.command == "PING":
@@ -805,9 +860,17 @@ class Chat:
         elif msg.command == "366":
             pass
         elif msg.command == "PRIVMSG":
-            d = datetime.fromtimestamp(int(msg.tags["tmi-sent-ts"])/1000)
-            u = msg.tags["display-name"]
-            await self._print_line(d, u, msg.params[0], msg.trailing)
+            d = datetime.fromtimestamp(int(msg.tags["tmi-sent-ts"])/1000, tz=timezone.utc)
+            u = User(self.client, user_id=msg.tags["user-id"], user_name=msg.tags["display-name"])
+            c = Comment(self.client,
+                comment_id = msg.tags["id"],
+                user = u,
+                created_at = d,
+                offset = (d - self.start).total_seconds(),
+                channel_name = msg.params[0],
+                body = msg.trailing,
+            )
+            await self._print_comment(c)
         elif msg.command == "USERSTATE":
             pass
         elif msg.command == "ROOMSTATE":
@@ -822,14 +885,26 @@ class Chat:
             logger.debug(f"unhandled command: {msg.command}")
 
     @staticmethod
-    async def run(client, input_path, read_only, join_parts, channels):
+    async def run(client, channels, output, subtitles=False, duration=None, read_only=True, join_parts=False, input_path=None, start=None):
         r, w = await asyncio.open_connection(
             host = irc_addr[0], port = irc_addr[1],
             family = socket.AF_INET,
             ssl = True
         )
 
-        ctx = Chat(channels=channels, client=client, reader=r, writer=w)
+        if start:
+            logger.debug(f"comments will be offset against: {start}")
+
+        ctx = Chat(
+            channels = channels,
+            client = client,
+            reader = r,
+            writer = w,
+            output = output,
+            subtitles = subtitles,
+            duration = duration,
+            start = start or datetime.now(timezone.utc),
+        )
 
         if not read_only:
             os.makedirs(input_path, exist_ok=True)
@@ -1032,9 +1107,10 @@ def parse_args():
     add_json_argument(status_parser)
 
     comments = subparsers.add_parser("comments", help="download comments")
-    comments.add_argument("video", metavar="VIDEO", nargs=1, help="fetch comments of VIDEO")
+    comments.add_argument("content", metavar="CONTENT", nargs=1, help="fetch comments of CONTENT (either a channel or a video id)")
     comments.add_argument("--duration", type=float, default=10.0, help="comment display duration")
     comments.add_argument("--output", help="save to file instead of stdout")
+    comments.add_argument("--start", metavar="DATETIME", help="offset comments relative to DATETIME")
 
     args = parser.parse_args()
     if args.command is None:
@@ -1068,6 +1144,9 @@ def parse_args():
         if args.notify_follow is None:
             args.notify_follow = default_notify_follow_command
 
+    if args.command == "comments":
+        args.start = datetime.fromisoformat(args.start) if args.start else None
+
     return args
 
 if __name__ == "__main__":
@@ -1081,6 +1160,8 @@ if __name__ == "__main__":
         scopes.append("chat:read")
         if not args.read_only:
             scopes.append("chat:edit")
+    if args.command == "comments":
+        scopes.append("chat:read")
     if args.command == "stream":
         if args.stream_action in ["set-title", "edit-title", "set-category", "edit-category"]:
             scopes.append("channel_editor")
@@ -1099,9 +1180,8 @@ if __name__ == "__main__":
                 channels = args.channels,
                 input_path = args.input_path,
                 read_only = args.read_only,
-                join_parts = args.join_parts,
-                )
-            )
+                output = sys.stdout
+            ))
 
         try:
             loop.run_forever()
@@ -1186,22 +1266,29 @@ if __name__ == "__main__":
             for k, v in d.items():
                 print(f"{k}: {v}")
     elif args.command == "comments":
-        vid = args.video[0]
-        def fmt(td):
-            h = int(td/3600); td -= h*3600
-            m = int(td/60); td -= m*60
-            s = int(td); td -= s
-            ms = int(td*1000)
-            return f"{h:02}:{m:02}:{s:02},{ms:03}"
-
+        content = args.content[0]
         if args.output is None:
             f = sys.stdout
         else:
+            with open(args.output, 'a'):
+                os.utime(args.output, None)
             f = open(args.output, "w")
 
-        for i, c in enumerate(c.comments(vid)):
-            f.write(f"{i}\n")
-            f.write(f"{fmt(c.offset)} --> {fmt(c.offset + args.duration)}\n")
-            f.write(f"{c.user.user_name}: {c.body}\n\n")
+        def go(c):
+            for u in c.user(content):
+                loop = asyncio.get_event_loop()
+                t = loop.create_task(Chat.run(client=c, channels=[u], read_only=True, output=f, start=args.start, subtitles=True, duration=args.duration))
+                try:
+                    loop.run_until_complete(t)
+                except KeyboardInterrupt:
+                    logger.debug("received keyboard interrupt: stopping")
+                    t.cancel()
+                    loop.stop()
+                return
+
+            for v in c.video(content):
+                for i, c in enumerate(v.comments):
+                    f.write(c.srt(args.duration))
+        go(c)
     else:
         logger.error(f"unhandled command: {args.command}")
