@@ -1152,6 +1152,16 @@ def parse_args():
 
     return args
 
+
+def run_task(t, loop=None):
+    loop = loop or asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(t)
+    except KeyboardInterrupt:
+        logger.debug("received keyboard interrupt: stopping")
+        t.cancel()
+        loop.stop()
+
 if __name__ == "__main__":
     args = parse_args()
     logger = setup_logger(args.log.upper())
@@ -1170,27 +1180,20 @@ if __name__ == "__main__":
             scopes.append("channel_editor")
     c = Client(token=Client.fetch_token(scopes=scopes, token_path=args.token_path))
 
-    if args.command == "activity" or args.command == "chat":
-        loop = asyncio.get_event_loop()
-
-        # TODO: make it possible to run both acivity and chat (how to handle the options nicely?)
-        if args.command == "activity":
-            loop.create_task(activity_feed(client=c, args=args))
-
-        if args.command == "chat":
-            loop.create_task(Chat.run(
-                client = c,
-                channels = args.channels,
-                input_path = args.input_path,
-                read_only = args.read_only,
-                output = sys.stdout
-            ))
-
-        try:
-            loop.run_forever()
-        except KeyboardInterrupt:
-            logger.debug("received keyboard interrupt: stopping")
-            loop.stop()
+    if args.command == "activity":
+        f = activity_feed(client=c, args=args)
+        t = asyncio.get_event_loop().create_task(f)
+        run_task(t)
+    elif args.command == "chat":
+        f = Chat.run(
+            client = c,
+            channels = args.channels,
+            input_path = args.input_path,
+            read_only = args.read_only,
+            output = sys.stdout
+        )
+        t = asyncio.get_event_loop().create_task(f)
+        run_task(t)
     elif args.command == "follow":
         c.follow(*args.channels)
     elif args.command == "unfollow":
