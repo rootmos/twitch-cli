@@ -623,6 +623,18 @@ class Comment:
             channel = client.channel(j["channel_id"]),
         )
 
+    def duration_heuristics(self, duration):
+        if self.body.startswith("!") or self.user.user_name.lower().endswith("bot"):
+            return duration/4
+
+        l = len(self.body)
+        ws = len(self.body.split())
+        if l < 10 or ws <= 3:
+            duration /= 2
+        if l > 25 and ws > 7:
+            duration *= 2
+        return duration
+
     def srt(self, i, duration):
         def fmt(td):
             h = int(td/3600); td -= h*3600
@@ -632,7 +644,7 @@ class Comment:
             return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
         s  = f"{i}\n"
-        s += f"{fmt(self.offset)} --> {fmt(self.offset + duration)}\n"
+        s += f"{fmt(self.offset)} --> {fmt(self.offset + self.duration_heuristics(duration))}\n"
         s += f"{self.user.user_name}: {self.body}\n\n"
         return s
 
