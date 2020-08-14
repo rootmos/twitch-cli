@@ -18,6 +18,7 @@ import select
 import errno
 import asyncio
 import logging
+import hashlib
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -597,6 +598,8 @@ class Stream:
         )
 
 class Comment:
+    user_names = {}
+
     def __init__(self, client, body, channel=None, channel_name=None, comment_id=None, user=None, created_at=None, offset=None):
         self.client = client
         self.comment_id = comment_id
@@ -605,10 +608,13 @@ class Comment:
         self.offset = offset
         self.body = body
         self.channel = channel
+
         if self.channel is not None:
             self.channel_name = self.channel.channel_name
         else:
             self.channel_name = channel_name
+
+        Comment.observe_user_name(self.user.user_name)
 
     @staticmethod
     def from_twitch_json(client, j):
@@ -635,6 +641,25 @@ class Comment:
             duration *= 2
         return duration
 
+    @staticmethod
+    def user_color(user_name):
+        bs = hashlib.md5(user_name.lower().encode("UTF-8")).digest()
+        (r, g) = bs[:2]
+        b = 255 - min(r+g, 255)
+        return f"#{r:02X}{g:02X}{b:02X}"
+
+    @staticmethod
+    def observe_user_name(user_name):
+        if user_name not in Comment.user_names:
+            Comment.user_names[user_name] = re.compile(r'\b' + re.escape(user_name) + r'\b', flags=re.IGNORECASE)
+
+    @staticmethod
+    def colorize_user_names(msg):
+        for user_name, r in Comment.user_names.items():
+            repl = f"<font color=\"{Comment.user_color(user_name)}\">{user_name}</font>"
+            (msg, n) = r.subn(repl, msg)
+        return msg
+
     def srt(self, i, duration):
         def fmt(td):
             h = int(td/3600); td -= h*3600
@@ -645,7 +670,12 @@ class Comment:
 
         s  = f"{i}\n"
         s += f"{fmt(self.offset)} --> {fmt(self.offset + self.duration_heuristics(duration))}\n"
-        s += f"{self.user.user_name}: {self.body}\n\n"
+
+        msg = self.body.replace('\n', '')
+        msg = re.sub(r"(^|\s)@(\w+)\b", r"\1\2", msg)
+        msg = Comment.colorize_user_names(msg)
+
+        s += f"<font color=\"{Comment.user_color(self.user.user_name)}\">{self.user.user_name}</font> {msg}\n\n"
         return s
 
 def tabularize(rows, pad=" ", sep=" "):
