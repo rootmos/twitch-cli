@@ -1255,7 +1255,7 @@ if __name__ == "__main__":
         for s in c.streams(fs):
             choices.append(((s.user.user_name, "", "", clean_title(s.title)), s.url))
         for v in vs:
-            choices.append(((v.user.user_name, render_duration(v.duration), v.typ[0], clean_title(v.title)), v.url))
+            choices.append(((v.user.user_name, render_duration(v.duration), v.typ[0], clean_title(v.title), v.url), v.url))
 
         if args.menu:
             for c in dmenu(choices, lines=args.menu_lines): print(c)
