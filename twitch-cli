@@ -344,7 +344,8 @@ class Client:
         return us
 
     def channel(self, channel_id):
-        if id not in self._channels:
+        if channel_id not in self._channels:
+            logger.debug(f"fetching channel info: {channel_id}")
             self._channels[channel_id] = Channel.from_twitch_json(self, self.get(f"/channels/{channel_id}", kraken=True))
         return self._channels[channel_id]
 
@@ -370,18 +371,20 @@ class Client:
         self.post(f"/webhooks/hub", body=body)
 
     def comments(self, video_id):
-        cs = []
         p = {"limit": 100}
+        n = 0
+        last = None
         while True:
             j = self.get(f"/videos/{video_id}/comments", v5=True, params=p)
             for c in j["comments"]:
-                c = Comment.from_twitch_json(self, c)
-                cs.append(c)
+                n += 1
+                last = Comment.from_twitch_json(self, c)
+                yield last
 
             if "_next" not in j: break
             p["cursor"] = j["_next"]
-            logger.debug(f"comments fetching progress: video_id={video_id} n={len(cs)}")
-        return cs
+            logger.info(f"comments fetching progress: video_id={video_id} n={n} offset={render_duration(int(last.offset))}")
+        logger.info(f"comments fetching completed: video_id={video_id} n={n}")
 
     def video(self, *video_ids):
         vs = []
@@ -1274,21 +1277,18 @@ if __name__ == "__main__":
                 os.utime(args.output, None)
             f = open(args.output, "w")
 
-        def go(c):
-            for u in c.user(content):
-                loop = asyncio.get_event_loop()
-                t = loop.create_task(Chat.run(client=c, channels=[u], read_only=True, output=f, start=args.start, subtitles=True, duration=args.duration))
-                try:
-                    loop.run_until_complete(t)
-                except KeyboardInterrupt:
-                    logger.debug("received keyboard interrupt: stopping")
-                    t.cancel()
-                    loop.stop()
-                return
-
+        us = c.user(content)
+        if len(us) > 0:
+            for u in us:
+                run_task(asyncio.get_event_loop().create_task(
+                    Chat.run(client=c, channels=[u], read_only=True, output=f, start=args.start, subtitles=True, duration=args.duration)
+                ))
+        else:
             for v in c.video(content):
-                for i, c in enumerate(v.comments):
-                    f.write(c.srt(args.duration))
-        go(c)
+                i = 0
+                for c in v.comments:
+                    f.write(c.srt(i, args.duration))
+                    f.flush()
+                    i += 1
     else:
         logger.error(f"unhandled command: {args.command}")
