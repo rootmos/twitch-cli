@@ -678,6 +678,172 @@ class Comment:
         s += f"<font color=\"{Comment.user_color(self.user.user_name)}\">{self.user.user_name}</font> {msg}\n\n"
         return s
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Twitch command line interface")
+    subparsers = parser.add_subparsers(help="sub-commands", dest='command')
+
+    default_config_path = "~/.twitch-cli"
+    default_activity_events = ["live", "follow"]
+    default_notify_live_command = "notify-send --app-name=twitch '%c went live' '%t'"
+    default_notify_follow_command = "notify-send --app-name=twitch '%u followed %c'"
+
+    parser.add_argument("--log", default="WARN", help="set log level")
+    parser.add_argument("--config-path", metavar="CONFIG_PATH", help=f"configuration base path (default: {default_config_path})")
+    parser.add_argument("--token-path", help=f"token path (default: CONFIG_PATH/tokens.json)")
+
+    def add_json_argument(p):
+        p.add_argument("--json", help="output json", action="store_true")
+    def add_menu_argument(p):
+        p.add_argument("--menu", help="run dmenu", action="store_true")
+        p.add_argument("--menu-lines", type=int, default=20,
+                help="number of maximum lines in the menu")
+
+    def add_channels(p, help, following_by_default=False):
+        g = p.add_argument_group("channel specification")
+
+        if following_by_default:
+            help += " (defaults to followed channels)"
+
+        g.add_argument("channels", metavar="CHANNEL", nargs="*", help=help)
+        g.add_argument("--following", action="store_true", default="auto" if following_by_default else False)
+        g.add_argument("--exclude", metavar="PATH",
+            help=f"exclude channel if it appears in the specified file (default: CONFIG_PATH/exclude)")
+        g.add_argument("--list", metavar="FILE", default=[], nargs="*", help=f"include channels listed in FILE")
+        g.add_argument("--favorites", action="store_true", help=f"include channels listed in CONFIG_PATH/favorites")
+
+    activity = subparsers.add_parser("activity", help="activity feed")
+    add_channels(activity, "follow activity feed of CHANNEL")
+    activity.add_argument("--event", metavar="EVENT", default=default_activity_events, nargs="*",
+            help=f"event types: {','.join(default_activity_events)}")
+    activity.add_argument("--notify-live", metavar="COMMAND", default=False, nargs="?",
+            help=f"command to run when channel goes live (%%c replaced with channel name, %%t with the stream title)")
+    activity.add_argument("--notify-follow", metavar="COMMAND", default=False, nargs="?",
+            help=f"command to run when channel goes live (%%c is replaced with channel name, %%u with user name)")
+
+    follow = subparsers.add_parser("follow", help="follow channel(s)")
+    add_channels(follow, "follow CHANNEL")
+
+    unfollow = subparsers.add_parser("unfollow", help="unfollow user(s)")
+    add_channels(unfollow, "unfollow CHANNEL")
+
+    following = subparsers.add_parser("following", help="list followed users")
+    add_json_argument(following)
+    add_menu_argument(following)
+
+    list_parser = subparsers.add_parser("list", aliases=["live"], help="list live streams and videos (default)")
+    add_channels(list_parser, "list streams and videos of CHANNEL", following_by_default=True)
+    list_parser.add_argument("--live", action="store_true", help="list only live streams (synonym for --since=0)")
+    list_parser.add_argument("--since", type=int, default=3, help="days to list videos")
+    list_parser.add_argument("--title-max-length", type=int, default=80,
+            help="maximum length of printed titles")
+    add_json_argument(list_parser)
+    add_menu_argument(list_parser)
+
+    chat = subparsers.add_parser("chat", help="interact with chat")
+    add_channels(chat, "join CHANNEL's chat")
+    chat.add_argument("--input-path", metavar="PATH",
+            help=f"create chat input channel at PATH/CHANNEL (default: CONFIG_PATH/channel)")
+    chat.add_argument("--read-only", action="store_true", default=False,
+            help="lurker mode")
+    chat.add_argument("--join-parts", action="store_true", default=False,
+            help="display who joins and leaves the chat")
+
+    stream = subparsers.add_parser("stream", help="manage stream")
+    stream_actions = stream.add_subparsers(help="management actions", dest='stream_action')
+
+    title_parser = stream_actions.add_parser("title", help="print stream title")
+    add_json_argument(title_parser)
+
+    set_title_parser = stream_actions.add_parser("set-title", help="set stream title")
+    set_title_parser.add_argument("title", metavar="TITLE", help="set stream title to TITLE")
+
+    edit_title_parser = stream_actions.add_parser("edit-title", help="edit stream title using $EDITOR")
+
+    category_parser = stream_actions.add_parser("category", help="print stream category")
+    add_json_argument(category_parser)
+
+    set_category_parser = stream_actions.add_parser("set-category", help="set stream category")
+    set_category_parser.add_argument("category", metavar="CATEGORY", help="set stream category to CATEGORY")
+
+    edit_category_parser = stream_actions.add_parser("edit-category", help="edit stream category using $EDITOR")
+
+    status_parser = stream_actions.add_parser("status", help="print stream status")
+    add_json_argument(status_parser)
+
+    comments = subparsers.add_parser("comments", help="download comments")
+    comments.add_argument("content", metavar="CONTENT", nargs=1, help="fetch comments of CONTENT (either a channel or a video id)")
+    comments.add_argument("--duration", type=float, default=10.0, help="comment display duration")
+    comments.add_argument("--output", help="save to file instead of stdout")
+    comments.add_argument("--start", metavar="DATETIME", help="offset comments relative to DATETIME")
+
+    args = parser.parse_args()
+    if args.command is None:
+        args = parser.parse_args(["list"])
+
+    if args.config_path is None:
+        args.config_path = Path(default_config_path).expanduser()
+
+    if args.token_path is None:
+        args.token_path = args.config_path / "tokens.json"
+
+    if args.command == "live":
+        args.command = "list"
+        args.since = 0
+
+    if args.command == "list":
+        if args.live:
+            args.since = 0
+
+    if args.command == "chat":
+        if args.input_path is None:
+            args.input_path = args.config_path / "channel"
+
+    if args.command == "activity":
+        if args.notify_live is None:
+            args.notify_live = default_notify_live_command
+
+        if args.notify_follow is None:
+            args.notify_follow = default_notify_follow_command
+
+    if args.command == "comments":
+        args.start = datetime.fromisoformat(args.start) if args.start else None
+
+    return args
+
+def parse_channels(client, args):
+    if args.exclude is None:
+        args.exclude = args.config_path / "exclude"
+
+    if os.path.exists(args.exclude):
+        with open(args.exclude, "r") as f:
+            logger.debug(f"excluding channels listed in: {f.name}")
+            exclude = [ l.strip().lower() for l in f ]
+    else:
+        exclude = []
+
+    ls = args.list
+    if args.favorites:
+        ls.append(args.config_path / "favorites")
+
+    if args.following == "auto":
+        if not ls:
+            fs = c.me.following()
+        else:
+            fs = []
+    elif args.following:
+        fs = c.me.following()
+    else:
+        fs = []
+
+    for l in ls:
+        with open(l, "r") as f:
+            logger.debug(f"including channels listed in: {f.name}")
+            fs += c.user(*[l.rstrip() for l in f])
+
+    logger.debug(f"acting on channels: {fs}")
+
+    return list(filter(lambda f: f.user_name.lower() not in exclude, fs))
+
 def tabularize(rows, pad=" ", sep=" "):
     if len(rows) == 0:
         return []
@@ -883,6 +1049,7 @@ class Chat:
 
     async def _handle_message(self, msg, join_parts=False):
         if msg.command == "PING":
+            logger.debug("websocket PING")
             await self.send_line(f"PONG {msg.trailing}")
             return
 
@@ -986,7 +1153,9 @@ async def activity_feed(client, args):
     base = "wss://ws.twitch.rootmos.io"
     url = base + "/sessions"
 
-    us = client.user(args.channels)
+    us = parse_channels(client, args)
+    if not us:
+        return
 
     async with websockets.connect(url) as ws:
         session = json.loads(await ws.recv())["session"]
@@ -995,6 +1164,9 @@ async def activity_feed(client, args):
         streams_base_url = "https://api.twitch.tv/helix/streams"
 
         for u in us:
+            if not args.event:
+                continue
+
             topics = []
             if "follow" in args.event:
                 topics.append(f"{follows_base_url}?first=1&to_id={u.user_id}")
@@ -1002,8 +1174,10 @@ async def activity_feed(client, args):
                 topics.append(f"{streams_base_url}?user_id={u.user_id}")
 
             for t in topics:
-                logger.debug(f"subscribing to topic: {t}")
+                logger.debug(f"subscribing to topic ({u.user_name}): {t}")
                 await ws.send(json.dumps({"subscription": {"topic": t}}))
+
+            logger.info(f"subscribed to activity feed ({' '.join(args.event)}): {u}")
 
         while True:
             e = json.loads(await ws.recv())
@@ -1011,9 +1185,12 @@ async def activity_feed(client, args):
             if "subscription" in e:
                 sub = e["subscription"]
                 state, topic, callback, secret = sub["state"], sub["topic"], sub["callback_url"], sub["secret"]
+
                 if state == "UNVERIFIED":
-                    logger.debug(f"verifying topic: topic={topic} callback={callback}")
-                    c.webhook(topic=topic, callback=callback, secret=secret)
+                    async def sub(topic, callback, secret):
+                        logger.debug(f"verifying topic: topic={topic} callback={callback}")
+                        c.webhook(topic=topic, callback=callback, secret=secret)
+                    asyncio.ensure_future(sub(topic, callback, secret))
                 elif state == "VERIFIED":
                     logger.debug(f"verified topic: {topic}")
 
@@ -1030,7 +1207,7 @@ async def activity_feed(client, args):
                     delay = ((vat + (eat-vat)*0.75) - now).total_seconds()
                     asyncio.ensure_future(resub(delay, topic, callback, secret))
                 elif state == "DENIED":
-                    logger.debug(f"denied subscription: topic={topic} reason={sub['reason']}")
+                    logger.warning(f"denied subscription: topic={topic} reason={sub['reason']}")
                 elif state == "TIMEDOUT":
                     logger.warning(f"subscription timedout: topic={topic}")
                 else:
@@ -1066,133 +1243,6 @@ async def activity_feed(client, args):
                     logger.warning(f"unhandled event: {e}")
             else:
                 logger.warning(f"unexpected message: {e}")
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Twitch command line interface")
-    subparsers = parser.add_subparsers(help="sub-commands", dest='command')
-
-    default_config_path = "~/.twitch-cli"
-    default_activity_events = ["live", "follow"]
-    default_notify_live_command = "notify-send --app-name=twitch '%c went live' '%t'"
-    default_notify_follow_command = "notify-send --app-name=twitch '%u followed %c'"
-
-    parser.add_argument("--log", default="WARN", help="set log level")
-    parser.add_argument("--config-path", metavar="CONFIG_PATH", help=f"configuration base path (default: {default_config_path})")
-    parser.add_argument("--token-path", help=f"token path (default: CONFIG_PATH/tokens.json)")
-
-    def add_json_argument(p):
-        p.add_argument("--json", help="output json", action="store_true")
-    def add_menu_argument(p):
-        p.add_argument("--menu", help="run dmenu", action="store_true")
-        p.add_argument("--menu-lines", type=int, default=20,
-                help="number of maximum lines in the menu")
-
-    activity = subparsers.add_parser("activity", help="activity feed")
-    activity.add_argument("channels", metavar="CHANNEL", nargs="+",
-            help="follow activity feed of CHANNEL")
-    activity.add_argument("--event", metavar="EVENT", default=default_activity_events, nargs="*",
-            help=f"event types: {','.join(default_activity_events)}")
-    activity.add_argument("--notify-live", metavar="COMMAND", default=False, nargs="?",
-            help=f"command to run when channel goes live (%%c replaced with channel name, %%t with the stream title)")
-    activity.add_argument("--notify-follow", metavar="COMMAND", default=False, nargs="?",
-            help=f"command to run when channel goes live (%%c is replaced with channel name, %%u with user name)")
-
-    follow = subparsers.add_parser("follow", help="follow channel(s)")
-    follow.add_argument("channels", metavar="CHANNEL", nargs="+", help="follow CHANNEL")
-
-    unfollow = subparsers.add_parser("unfollow", help="unfollow user(s)")
-    unfollow.add_argument("channels", metavar="CHANNEL", nargs="+", help="unfollow CHANNEL")
-
-    following = subparsers.add_parser("following", help="list followed users")
-    add_json_argument(following)
-    add_menu_argument(following)
-
-    list_parser = subparsers.add_parser("list", aliases=["live"], help="list live streams and videos (default)")
-    list_parser.add_argument("channels", metavar="CHANNEL", nargs="*",
-            help="list streams and videos of CHANNEL (defaults to followed channels)")
-    list_parser.add_argument("--live", action="store_true", help="list only live streams (synonym for --since=0)")
-    list_parser.add_argument("--since", type=int, default=3, help="days to list videos")
-    list_parser.add_argument("--exclude", metavar="PATH",
-            help=f"exclude channel if it appears in the specified file (default: CONFIG_PATH/exclude)")
-    list_parser.add_argument("--title-max-length", type=int, default=80,
-            help="maximum length of printed titles")
-    add_json_argument(list_parser)
-    add_menu_argument(list_parser)
-
-    chat = subparsers.add_parser("chat", help="interact with chat")
-    chat.add_argument("channels", metavar="CHANNEL", nargs="*",
-            help="join CHANNEL's chat")
-    chat.add_argument("--input-path", metavar="PATH",
-            help=f"create chat input channel at PATH/CHANNEL (default: CONFIG_PATH/channel)")
-    chat.add_argument("--read-only", action="store_true", default=False,
-            help="lurker mode")
-    chat.add_argument("--join-parts", action="store_true", default=False,
-            help="display who joins and leaves the chat")
-
-    stream = subparsers.add_parser("stream", help="manage stream")
-    stream_actions = stream.add_subparsers(help="management actions", dest='stream_action')
-
-    title_parser = stream_actions.add_parser("title", help="print stream title")
-    add_json_argument(title_parser)
-
-    set_title_parser = stream_actions.add_parser("set-title", help="set stream title")
-    set_title_parser.add_argument("title", metavar="TITLE", help="set stream title to TITLE")
-
-    edit_title_parser = stream_actions.add_parser("edit-title", help="edit stream title using $EDITOR")
-
-    category_parser = stream_actions.add_parser("category", help="print stream category")
-    add_json_argument(category_parser)
-
-    set_category_parser = stream_actions.add_parser("set-category", help="set stream category")
-    set_category_parser.add_argument("category", metavar="CATEGORY", help="set stream category to CATEGORY")
-
-    edit_category_parser = stream_actions.add_parser("edit-category", help="edit stream category using $EDITOR")
-
-    status_parser = stream_actions.add_parser("status", help="print stream status")
-    add_json_argument(status_parser)
-
-    comments = subparsers.add_parser("comments", help="download comments")
-    comments.add_argument("content", metavar="CONTENT", nargs=1, help="fetch comments of CONTENT (either a channel or a video id)")
-    comments.add_argument("--duration", type=float, default=10.0, help="comment display duration")
-    comments.add_argument("--output", help="save to file instead of stdout")
-    comments.add_argument("--start", metavar="DATETIME", help="offset comments relative to DATETIME")
-
-    args = parser.parse_args()
-    if args.command is None:
-        args = parser.parse_args(["list"])
-
-    if args.config_path is None:
-        args.config_path = Path(default_config_path).expanduser()
-
-    if args.token_path is None:
-        args.token_path = args.config_path / "tokens.json"
-
-    if args.command == "live":
-        args.command = "list"
-        args.since = 0
-
-    if args.command == "list":
-        if args.exclude is None:
-            args.exclude = args.config_path / "exclude"
-
-        if args.live:
-            args.since = 0
-
-    if args.command == "chat":
-        if args.input_path is None:
-            args.input_path = args.config_path / "channel"
-
-    if args.command == "activity":
-        if args.notify_live is None:
-            args.notify_live = default_notify_live_command
-
-        if args.notify_follow is None:
-            args.notify_follow = default_notify_follow_command
-
-    if args.command == "comments":
-        args.start = datetime.fromisoformat(args.start) if args.start else None
-
-    return args
 
 
 def run_task(t, loop=None):
@@ -1251,18 +1301,7 @@ if __name__ == "__main__":
                 for f in fs: print(f.user_name)
         run_default_action = False
     elif args.command == "list":
-        if args.exclude is not None and os.path.exists(args.exclude):
-            with open(args.exclude, "r") as f:
-                logger.debug(f"excluding channels listed in: {f.name}")
-                exclude = [ l.strip().lower() for l in f ]
-                logger.debug(f"excluding channels: {exclude}")
-        else:
-            exclude = []
-
-        if len(args.channels) > 0:
-            fs = c.user(args.channels)
-        else:
-            fs = list(filter(lambda f: f.user_name.lower() not in exclude, c.me.following()))
+        fs = parse_channels(c, args)
 
         vs = []
         if args.since is not None and args.since != 0:
