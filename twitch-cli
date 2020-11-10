@@ -6,6 +6,7 @@ import json
 import requests
 import dateutil.parser
 import time
+import threading
 import concurrent.futures
 import subprocess
 import sys
@@ -77,6 +78,11 @@ def render_duration(secs):
         s += f"{secs}s"
 
     return s
+
+def sanitize_str(t):
+    t = t.replace('\n', ' ')
+    t = t.encode("ascii", "ignore")
+    return str(t[:args.title_max_length], "ascii")
 
 # logging
 
@@ -186,13 +192,60 @@ def new_token(scope):
 
     return token
 
+# the cache
+
+class Cache:
+    def __init__(self, base_path, force_misses=False):
+        self.base_path = base_path
+        self.force_misses = force_misses
+
+    def _path(self, kind, key):
+        return self.base_path / kind / (key + ".json")
+
+    def has(self, kind, key):
+        if self.force_misses:
+            return False
+        return self._path(kind, key).exists()
+
+    def get(self, kind, key):
+        with open(self._path(kind, key), "r") as f:
+            value = json.loads(f.read())
+            return value
+
+    def put(self, kind, key, value):
+        b = self.base_path / kind
+        if not b.exists():
+            os.makedirs(b)
+
+        with open(self._path(kind, key), "w") as f:
+            f.write(json.dumps(value))
+
+class InMemoryCache:
+    def __init__(self):
+        logger.debug("using in-memory cache")
+        self.lock = threading.Lock()
+        self._db = {}
+
+    def has(self, kind, key):
+        with self.lock:
+            return (kind, key) in self._db
+
+    def get(self, kind, key):
+        with self.lock:
+            return self._db[(kind,key)]
+
+    def put(self, kind, key, value):
+        with self.lock:
+            self._db[(kind,key)] = value
+
 # the client
 
 class Client:
-    def __init__(self, token):
+    def __init__(self, token, cache = None):
         self._me = None
         self.token = token
         self._channels = {}
+        self.cache = cache if cache is not None else InMemoryCache()
 
     @staticmethod
     def fetch_token(scopes, token_path):
@@ -303,6 +356,7 @@ class Client:
 
         while True:
             r = requests.get(url, params=params, headers=h)
+            logger.debug(f"{r.status_code} GET {r.url}")
             if r.status_code == 429:
                 l = r.headers["Ratelimit-Limit"]
                 t = int(r.headers["Ratelimit-Reset"])
@@ -397,6 +451,34 @@ class Client:
 
             video_ids = video_ids[100:]
         return vs
+
+    def game(self, game_id):
+        return self.games(game_id)[0]
+
+    def games(self, *game_ids):
+        gs = []
+
+        gids = []
+        if self.cache:
+            for gid in game_ids:
+                if self.cache.has("game", gid):
+                    gs.append(Game.from_dict(self.cache.get("game", gid)))
+                else:
+                    gids.append(gid)
+        else:
+            gids = game_ids
+
+        while len(gids) > 0:
+            p = { "id": gids[:100] }
+            j = self.get("/games", params=p)
+            for i in j["data"]:
+                g = Game.from_twitch_json(i)
+                gs.append(g)
+                if self.cache:
+                    self.cache.put("game", g.game_id, g.to_dict())
+
+            gids = gids[100:]
+        return gs
 
 class User:
     def __init__(self, client, user_id, user_name, bio=None):
@@ -514,7 +596,7 @@ class Channel:
         }
 
 class Video:
-    def __init__(self, client, video_id, title, user, url, created_at, published_at, duration, typ):
+    def __init__(self, client, video_id, title, user, url, created_at, published_at, duration, views, typ):
         self.client = client
         self.video_id = video_id
         self.title = title
@@ -523,6 +605,7 @@ class Video:
         self.created_at = created_at
         self.published_at = published_at
         self.duration = duration
+        self.views = views
         self.typ = typ
         self._comments = None
 
@@ -557,6 +640,7 @@ class Video:
             created_at=created_at,
             published_at=published_at,
             duration=parse_duration(j["duration"]),
+            views=j["view_count"],
             typ=j["type"],
         )
 
@@ -569,16 +653,20 @@ class Video:
             "published_at": self.published_at.isoformat(),
             "title": self.title,
             "url": self.url,
+            "views": self.views,
             "type": self.typ,
             "duration": self.duration,
             "duration_human": render_duration(self.duration),
         }
 
 class Stream:
-    def __init__(self, client, user, title):
+    def __init__(self, client, user, title, viewers, started_at, game):
         self.client = client
         self.user = user
         self.title = title
+        self.viewers = viewers
+        self.started_at = started_at
+        self.game = game
 
     def __str__(self):
         return self.title
@@ -593,8 +681,52 @@ class Stream:
     @staticmethod
     def from_twitch_json(client, j):
         return Stream(client,
-            title=j["title"],
-            user=User.from_twitch_json(client, j),
+            title = j["title"],
+            user = User.from_twitch_json(client, j),
+            viewers = j["viewer_count"],
+            started_at = dateutil.parser.isoparse(j["started_at"]),
+            game = None if j["game_id"] == "" else client.game(j["game_id"]),
+        )
+
+    def to_dict(self):
+        return {
+            "title": self.title,
+            "user_id": self.user.user_id,
+            "user_name": self.user.user_name,
+            "viewers": self.viewers,
+            "started_at": self.started_at.isoformat(),
+            "game": self.game.to_dict() if self.game else None,
+        }
+
+class Game:
+    def __init__(self, game_id, name):
+        self.game_id = game_id
+        self.name = name
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.name
+
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "game_id": self.game_id,
+        }
+
+    @staticmethod
+    def from_dict(d):
+        return Game(
+            name = d["name"],
+            game_id = d["game_id"],
+        )
+
+    @staticmethod
+    def from_twitch_json(j):
+        return Game(
+            name = j["name"],
+            game_id = j["id"],
         )
 
 class Comment:
@@ -689,7 +821,11 @@ def parse_args():
 
     parser.add_argument("--log", default="WARN", help="set log level")
     parser.add_argument("--config-path", metavar="CONFIG_PATH", help=f"configuration base path (default: {default_config_path})")
-    parser.add_argument("--token-path", help=f"token path (default: CONFIG_PATH/tokens.json)")
+    parser.add_argument("--token-path", help="token path (default: CONFIG_PATH/tokens.json)")
+
+    parser.add_argument("--disable-cache", action="store_true", default=False, help="disable cache")
+    parser.add_argument("--refresh-cache", action="store_true", default=False, help="cache refresh (assume cache is cold)")
+    parser.add_argument("--cache-path", help=f"cache path (default: CONFIG_PATH/cache)")
 
     def add_json_argument(p):
         p.add_argument("--json", help="output json", action="store_true")
@@ -787,6 +923,9 @@ def parse_args():
 
     if args.token_path is None:
         args.token_path = args.config_path / "tokens.json"
+
+    if args.cache_path is None:
+        args.cache_path = args.config_path / "cache"
 
     if args.command == "live":
         args.command = "list"
@@ -1264,6 +1403,7 @@ def run_task(t, loop=None):
 if __name__ == "__main__":
     args = parse_args()
     logger = setup_logger(args.log.upper())
+    logger.debug(f"args: {args}")
 
     scopes = []
     if args.command in ["follow", "unfollow"]:
@@ -1277,7 +1417,11 @@ if __name__ == "__main__":
     if args.command == "stream":
         if args.stream_action in ["set-title", "edit-title", "set-category", "edit-category"]:
             scopes.append("channel_editor")
-    c = Client(token=Client.fetch_token(scopes=scopes, token_path=args.token_path))
+
+    cache = None
+    if not args.disable_cache:
+        cache = Cache(base_path=args.cache_path, force_misses=args.refresh_cache)
+    c = Client(token=Client.fetch_token(scopes=scopes, token_path=args.token_path), cache=cache)
 
     if args.command == "activity":
         f = activity_feed(client=c, args=args)
@@ -1318,20 +1462,23 @@ if __name__ == "__main__":
                     vs += f.result()
             vs = sorted(vs, key=lambda v: v.created_at, reverse=True)
 
+        ss = c.streams(fs)
+
         if args.json:
-            print(json.dumps([v.to_dict() for v in vs ]))
+            j = []
+            for v in vs:
+                j.append(v.to_dict())
+            for s in ss:
+                j.append(s.to_dict())
+
+            print(json.dumps(j))
             sys.exit(0)
 
-        def clean_title(t):
-            t = t.replace('\n', ' ')
-            t = t.encode("ascii", "ignore")
-            return str(t[:args.title_max_length], "ascii")
-
         choices = []
-        for s in c.streams(fs):
-            choices.append(((s.user.user_name, "", "", clean_title(s.title)), s.url))
+        for s in ss:
+            choices.append(((s.user.user_name, "", "", sanitize_str(s.title)), s.url))
         for v in vs:
-            choices.append(((v.user.user_name, render_duration(v.duration), v.typ[0], clean_title(v.title), v.url), v.url))
+            choices.append(((v.user.user_name, render_duration(v.duration), v.typ[0], sanitize_str(v.title), v.url), v.url))
 
         if args.menu:
             for c in dmenu(choices, lines=args.menu_lines): print(c)
