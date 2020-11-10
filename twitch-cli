@@ -821,28 +821,33 @@ def parse_channels(client, args):
     else:
         exclude = []
 
-    ls = args.list
+    ls = []
+    for l in args.list:
+        if os.path.exists(l):
+            ls.append(l)
+        elif os.path.exists(args.config_path / l):
+            ls.append(args.config_path / l)
+        else:
+            logger.error(f"unable to find list: {l}")
+
     if args.favorites:
         ls.append(args.config_path / "favorites")
 
+    fs = c.user(*args.channels)
     if args.following == "auto":
-        if not ls:
+        if not ls and not fs:
             fs = c.me.following()
-        else:
-            fs = []
     elif args.following:
-        fs = c.me.following()
-    else:
-        fs = []
+        fs += c.me.following()
 
     for l in ls:
         with open(l, "r") as f:
             logger.debug(f"including channels listed in: {f.name}")
             fs += c.user(*[l.rstrip() for l in f])
 
+    fs = list(filter(lambda f: f.user_name.lower() not in exclude, fs))
     logger.debug(f"acting on channels: {fs}")
-
-    return list(filter(lambda f: f.user_name.lower() not in exclude, fs))
+    return fs
 
 def tabularize(rows, pad=" ", sep=" "):
     if len(rows) == 0:
