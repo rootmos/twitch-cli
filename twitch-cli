@@ -656,7 +656,7 @@ class Comment:
     @staticmethod
     def colorize_user_names(msg):
         for user_name, r in Comment.user_names.items():
-            repl = f"<font color=\"{Comment.user_color(user_name)}\">{user_name}</font>"
+            repl = f"<font color=\"{Comment.user_color(user_name)}\">{re.escape(user_name)}</font>"
             (msg, n) = r.subn(repl, msg)
         return msg
 
@@ -775,8 +775,10 @@ def parse_args():
     comments.add_argument("--duration", type=float, default=10.0, help="comment display duration")
     comments.add_argument("--output", help="save to file instead of stdout")
     comments.add_argument("--start", metavar="DATETIME", help="offset comments relative to DATETIME")
+    comments.add_argument("--offset", metavar="N", type=float, default=0.0, help="offset comments by N seconds")
 
     args = parser.parse_args()
+
     if args.command is None:
         args = parser.parse_args(["list"])
 
@@ -1369,8 +1371,9 @@ if __name__ == "__main__":
         us = c.user(content)
         if len(us) > 0:
             for u in us:
+                start = args.start + timedelta(seconds=args.offset)
                 run_task(asyncio.get_event_loop().create_task(
-                    Chat.run(client=c, channels=[u], read_only=True, output=f, start=args.start, subtitles=True, duration=args.duration)
+                    Chat.run(client=c, channels=[u], read_only=True, output=f, start=start, subtitles=True, duration=args.duration)
                 ))
         else:
             for v in c.video(content):
