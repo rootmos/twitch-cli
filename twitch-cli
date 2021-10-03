@@ -118,7 +118,9 @@ def new_token(scope):
     url = f"{oauth2_url}/authorize?{urlencode(q)}"
 
     eprint(url)
-    os.system(f"xdg-open '{url}'")
+    ret = os.system(f"xdg-open '{url}' 2> /dev/null")
+    if ret:
+        eprint("Please open the link in a web browser to continue.")
 
     token = None
 
