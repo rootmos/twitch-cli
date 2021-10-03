@@ -118,7 +118,9 @@ def new_token(scope):
     url = f"{oauth2_url}/authorize?{urlencode(q)}"
 
     eprint(url)
-    os.system(f"xdg-open '{url}'")
+    ret = os.system(f"xdg-open '{url}' 2> /dev/null")
+    if ret:
+        eprint("Please open the link in a web browser to continue.")
 
     token = None
 
@@ -810,6 +812,11 @@ class Comment:
         s += f"<font color=\"{Comment.user_color(self.user.user_name)}\">{self.user.user_name}</font> {msg}\n\n"
         return s
 
+def default_path(arg, default_value):
+    if arg is None:
+        arg = default_value
+    return Path(arg).expanduser()
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Twitch command line interface")
     subparsers = parser.add_subparsers(help="sub-commands", dest='command')
@@ -918,14 +925,9 @@ def parse_args():
     if args.command is None:
         args = parser.parse_args(["list"])
 
-    if args.config_path is None:
-        args.config_path = Path(default_config_path).expanduser()
-
-    if args.token_path is None:
-        args.token_path = args.config_path / "tokens.json"
-
-    if args.cache_path is None:
-        args.cache_path = args.config_path / "cache"
+    args.config_path = default_path(args.config_path, default_config_path)
+    args.token_path = default_path(args.token_path, args.config_path / "tokens.json")
+    args.cache_path = default_path(args.cache_path, args.config_path / "cache")
 
     if args.command == "live":
         args.command = "list"
@@ -936,8 +938,7 @@ def parse_args():
             args.since = 0
 
     if args.command == "chat":
-        if args.input_path is None:
-            args.input_path = args.config_path / "channel"
+        args.input_path = default_path(args.input_path, args.config_path / "channel")
 
     if args.command == "activity":
         if args.notify_live is None:
@@ -952,8 +953,7 @@ def parse_args():
     return args
 
 def parse_channels(client, args):
-    if args.exclude is None:
-        args.exclude = args.config_path / "exclude"
+    args.exclude = default_path(args.exclude, args.config_path / "exclude")
 
     if os.path.exists(args.exclude):
         with open(args.exclude, "r") as f:
@@ -1404,6 +1404,10 @@ if __name__ == "__main__":
     args = parse_args()
     logger = setup_logger(args.log.upper())
     logger.debug(f"args: {args}")
+
+    if not args.config_path.exists():
+        logger.debug(f"creating config directory {args.config_path}")
+        args.config_path.mkdir()
 
     scopes = []
     if args.command in ["follow", "unfollow"]:
