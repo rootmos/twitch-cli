@@ -10,7 +10,7 @@ hstspreload==2020.6.9
 httptools==0.1.1
 httpx==0.11.1
 hyperframe==5.2.0
-idna==2.9
+idna==3.7
 multidict==4.7.6
 rfc3986==1.4.0
 sanic==20.3.0
