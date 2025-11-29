@@ -20,7 +20,6 @@ class Helix:
 
     def __init__(self, token=None):
         self._token = token
-        self.cache = {}
         self.session = requests.Session()
 
         self.scopes = [ "user:read:follows" ]
@@ -90,25 +89,61 @@ class Helix:
         self.session.headers.update(self.build_headers(token=self._token.value))
         return self
 
-    def _put_cache(self, rsp):
-        self.cache[rsp.url] = rsp.json()
+    def log_request(self, req):
+        logger.debug("request: %s %s %s", req.method, req.url, req.params)
 
-    def req(self, method, path, params=None, body=None, cache=None):
+    def req(self, method, path, params=None, body=None):
         hdr = {
             "Accept": "application/json",
         }
         req = requests.Request(method, self.base_url + path, headers=hdr, params=params, json=body)
-
-        if cache and req.url in self.cache:
-            j = self.cache[req.url]
-            return j
+        self.log_request(req)
 
         preq = self.session.prepare_request(req)
         rsp = self.session.send(preq)
         if rsp.status_code == 429:
             raise NotImplementedError(rsp)
         rsp.raise_for_status()
-        j = rsp.json()
-        if cache:
-            self._put_cache(rsp)
-        return j
+        return rsp.json()
+
+    def paginate(self, path, params, page_size=None):
+        hdr = {
+            "Accept": "application/json",
+        }
+
+        def build(after):
+            if isinstance(params, list):
+                qs = params
+                if page_size is not None:
+                    qs += [ ("first", str(page_size)) ]
+                if after is not None:
+                    qs += [ ("after", after) ]
+            elif isinstance(params, dict):
+                qs = params.copy()
+                if page_size is not None:
+                    qs["first"] = str(page_size)
+                if after is not None:
+                    qs["after"] = after
+            else:
+                raise ValueError(f"unable to paginate params: {params}")
+
+            return requests.Request("GET", self.base_url + path, headers=hdr, params=qs)
+
+        after = None
+        while True:
+            req = build(after)
+            self.log_request(req)
+            preq = self.session.prepare_request(req)
+            rsp = self.session.send(preq)
+            rsp.raise_for_status()
+            j = rsp.json()
+
+            for d in j["data"]:
+                yield d
+
+            p = j.get("pagination")
+            if p is None:
+                break
+            after = p.get("cursor")
+            if after is None:
+                break

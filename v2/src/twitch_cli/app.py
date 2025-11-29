@@ -16,10 +16,9 @@ def sandbox(args):
     logger.info("hello")
     helix = Helix().authenticate()
 
-    # rsp = helix.req("GET", "/users", params = [ ("login", "AdmiralBahroo") ])
-    # print(rsp)
+    # print(list(helix.paginate("/users", params=[("login", "AdmiralBahroo")])))
 
     user_id = helix._token.meta["user_id"]
-    params = { "user_id": user_id, "first": 100 }
-    rsp = helix.req("GET", "/channels/followed", params=params)
-    print(rsp)
+    params = { "user_id": user_id }
+    for x in helix.paginate("/channels/followed", params=params, page_size=100):
+        print(x)
