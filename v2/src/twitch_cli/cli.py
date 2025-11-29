@@ -48,6 +48,9 @@ def main_parser():
     def add_subcommand(cmd):
         return subparsers.add_parser(cmd, formatter_class=parser.formatter_class)
 
+    oauth_cmd = add_subcommand("oauth")
+    oauth_cmd.add_argument("-n", "--dont-fetch-new-token", action="store_true")
+
     sandbox_cmd = add_subcommand("sandbox")
 
     return parser
@@ -57,6 +60,8 @@ def main():
     logger.debug("args: %s", args)
 
     match args.cmd:
+        case "oauth":
+            app.oauth(args)
         case "sandbox":
             app.sandbox(args)
         case cmd:
