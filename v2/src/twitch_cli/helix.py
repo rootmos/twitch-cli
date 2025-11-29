@@ -112,14 +112,13 @@ class Helix:
         }
 
         def build(after):
+            qs = params.copy()
             if isinstance(params, list):
-                qs = params
                 if page_size is not None:
                     qs += [ ("first", str(page_size)) ]
                 if after is not None:
                     qs += [ ("after", after) ]
             elif isinstance(params, dict):
-                qs = params.copy()
                 if page_size is not None:
                     qs["first"] = str(page_size)
                 if after is not None:
