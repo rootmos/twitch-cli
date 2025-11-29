@@ -50,6 +50,7 @@ def main_parser():
 
     oauth_cmd = add_subcommand("oauth")
     oauth_cmd.add_argument("-n", "--dont-fetch-new-token", action="store_true")
+    oauth_cmd.add_argument("-f", "--force-fetch-new-token", action="store_true")
 
     sandbox_cmd = add_subcommand("sandbox")
 

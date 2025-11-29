@@ -18,20 +18,22 @@ class Helix:
     authorize_url = "https://id.twitch.tv/oauth2/authorize"
     validate_url = "https://id.twitch.tv/oauth2/validate"
 
-    def __init__(self, token=None, fetch_new_tokens=None):
+    def __init__(self, token=None):
         self._token = token
         self.cache = {}
         self.session = requests.Session()
-        self.fetch_new_tokens = fetch_new_tokens
+
+        self.scopes = [ "user:read:follows" ]
 
     @classmethod
     def build_headers(cls, token):
         return {
             "User-Agent": f"{whoami}-{package_version}",
+            "Client-ID": cls.client_id,
             "Authorization": f"Bearer {token}",
         }
 
-    def authenticate(self):
+    def authenticate(self, fetch_new_tokens=None, force=None):
         if self._token is not None:
             return self
 
@@ -41,14 +43,14 @@ class Helix:
         this = self
         class OAuth(oauth.OAuth):
             def __init__(self):
-                super().__init__(fetch_new_tokens=this.fetch_new_tokens)
+                super().__init__(fetch_new_tokens=fetch_new_tokens)
 
-            def url(self, scope: str | None = None) -> str:
+            def url(self) -> str:
                 return this.authorize_url + "?" + urllib.parse.urlencode({
                     "client_id": this.client_id,
                     "redirect_uri": self.redirect_url,
                     "response_type": "token",
-                    "scope": scope or "",
+                    "scope": ",".join(this.scopes),
                     "state": state,
                 })
 
@@ -84,7 +86,7 @@ class Helix:
                     },
                 )
 
-        self._token = OAuth().get_token()
+        self._token = OAuth().get_token(force=force)
         self.session.headers.update(self.build_headers(token=self._token.value))
         return self
 

@@ -177,20 +177,21 @@ class OAuth:
         st = os.path.join(xdg_base_dirs.xdg_state_home(), whoami)
         return os.path.join(st, "token.json")
 
-    def get_token(self) -> Token:
+    def get_token(self, force=None) -> Token:
         p = self.token_path()
 
-        if os.path.exists(p):
-            with open(p) as f:
-                t = Token.from_dict(json.load(f))
+        if force is not True:
+            if os.path.exists(p):
+                with open(p) as f:
+                    t = Token.from_dict(json.load(f))
 
-            now = datetime.now(UTC)
-            if now < t.expires:
-                logger.debug("token (%s): %s", t.meta, p)
-                return t
-            logger.debug("token expired (%s): %s", t.expires, p)
-        else:
-            logger.debug("token not found: %s", p)
+                now = datetime.now(UTC)
+                if now < t.expires:
+                    logger.debug("token (%s): %s", t.meta, p)
+                    return t
+                logger.debug("token expired (%s): %s", t.expires, p)
+            else:
+                logger.debug("token not found: %s", p)
 
         if not self.fetch_new_tokens:
             raise UnauthorizedException()
