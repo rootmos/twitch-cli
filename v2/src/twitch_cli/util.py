@@ -1,12 +1,14 @@
+import collections
 import datetime
 import logging
+import math
 import os
 import random
+import re
 import string
 import subprocess
 import sys
 import tempfile
-import threading
 
 from . import whoami
 
@@ -46,6 +48,7 @@ def now():
     return datetime.datetime.now().astimezone()
 
 def wait_indefinitely():
+    import threading
     forever = threading.Event()
     forever.wait()
 
@@ -78,3 +81,74 @@ def load_module_from_path(path):
     spec.loader.exec_module(module)
 
     return module
+
+def render_duration(secs: float | int | datetime.timedelta, short=False) -> str:
+    if isinstance(secs, datetime.timedelta):
+        secs = math.floor(secs.total_seconds())
+
+    if short is True:
+        short = 2
+    else:
+        short = short or 5
+
+    s = ""
+    if secs >= 31536000:
+        s += f"{secs // 31536000}y"
+        secs %= 31536000
+        short -= 1
+    if short == 0:
+        return s
+
+    if secs >= 86400:
+        s += f"{secs // 86400}d"
+        secs %= 86400
+        short -= 1
+    if short == 0:
+        return s
+
+    if secs >= 3600:
+        s += f"{secs // 3600}h"
+        secs %= 3600
+        short -= 1
+    if short == 0:
+        return s
+
+    if secs >= 60:
+        s += f"{secs // 60}m"
+        secs %= 60
+        short -= 1
+    if short == 0:
+        return s
+
+    if secs > 0:
+        s += f"{secs}s"
+    return s
+
+DURATION_PATTERN = re.compile("([0-9]+)([dDhHmMsSwW])")
+def parse_duration(string) -> None | datetime.timedelta:
+    secs = None
+    for m in DURATION_PATTERN.finditer(string):
+        n = int(m.group(1))
+        t = m.group(2)
+        if secs is None:
+            secs = 0
+        if t == "s" or t == "S":
+            secs += n
+        elif t == "m" or t == "M":
+            secs += n * 60
+        elif t == "h" or t == "H":
+            secs += n * 60 * 60
+        elif t == "d" or t == "D":
+            secs += n * 60 * 60 * 24
+        elif t == "w" or t == "W":
+            secs += n * 60 * 60 * 24 * 7
+    if secs is None:
+        raise ValueError("unable to parse duration: %s", string)
+    return datetime.timedelta(seconds=secs)
+
+# https://docs.python.org/3.13/library/collections.html#ordereddict-examples-and-recipes
+class LastUpdatedOrderedDict(collections.OrderedDict):
+    "Store items in the order the keys were last added"
+    def __setitem__(self, key, value):
+       super().__setitem__(key, value)
+       self.move_to_end(key)

@@ -1,4 +1,9 @@
+import string
+
+from dataclasses import dataclass
 from datetime import datetime, timedelta, UTC
+
+from prettytable import PrettyTable
 
 from . import util
 from .helix import Helix
@@ -14,6 +19,21 @@ def oauth(args):
 
     logger.debug("token: %s", helix._token)
     print(helix._token.value)
+
+@dataclass
+class User:
+    id: str
+    name: str
+
+@dataclass
+class Video:
+    id: str
+    title: str
+    user: User
+    url: str
+    duration: timedelta
+    created_at: datetime
+    published_at: datetime
 
 def sandbox(args):
     logger.info("hello")
@@ -35,7 +55,8 @@ def sandbox(args):
     following = list(util.pickle_cache("following", fetch_following))
     # following = ["40972890"]
 
-    after = datetime.now(UTC) - timedelta(days=3)
+    now = datetime.now(UTC)
+    after = now - timedelta(days=3)
 
     def fetch_videos():
         vs = []
@@ -47,7 +68,38 @@ def sandbox(args):
                 vs.append(j)
         return vs
 
-    vs = util.pickle_cache("videos", fetch_videos)
+    ws = util.pickle_cache("videos", fetch_videos)
 
+    vs = []
+    for j in ws:
+        vs.append(Video(
+            id = j["id"],
+            title = j["title"],
+            user = User(
+                id = j["user_id"],
+                name = j["user_name"],
+            ),
+            url = j["url"],
+            duration = util.parse_duration(j["duration"]),
+            created_at = datetime.fromisoformat(j["created_at"]),
+            published_at = datetime.fromisoformat(j["published_at"]),
+        ))
+    vs.sort(key=lambda v: v.published_at)
+
+    table = PrettyTable()
+    table.field_names = ["When", "User", "Title", "Duration", "URL"]
+    table.align = "l"
     for v in vs:
-        print(v)
+        if v.duration < timedelta(minutes=10):
+            continue
+        age = util.render_duration(now - v.published_at)
+        title = "".join(filter(lambda x: x in string.printable, v.title))
+        url = v.url.replace("www.twitch.tv", "twitch.tv")
+        table.add_row([
+            age,
+            v.user.name,
+            title,
+            util.render_duration(v.duration),
+            url,
+        ])
+    print(table.get_string())
