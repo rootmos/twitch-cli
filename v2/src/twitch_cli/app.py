@@ -107,7 +107,7 @@ def do_live(args):
     ss = app.streams(fs)
 
     ss = filter(f.stream, ss)
-    ss = sorted(ss, key=lambda s: s.started_at)
+    ss = sorted(ss, key=lambda s: s.started_at, reverse=True)
 
     now = datetime.now(UTC)
 
@@ -145,7 +145,7 @@ def do_videos(args):
     for u in fs:
         logger.debug("fetching videos from: %s", u)
         vs |= set(filter(f.video, app.videos(u, since=since)))
-    vs = sorted(vs, key=lambda v: v.published_at)
+    vs = sorted(vs, key=lambda v: v.published_at, reverse=True)
 
     table = PrettyTable()
     table.field_names = ["When", "User", "Title", "Duration", "URL"]
