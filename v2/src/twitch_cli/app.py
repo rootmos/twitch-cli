@@ -1,18 +1,17 @@
 import string
 
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 from typing import Iterable
 
 from prettytable import PrettyTable
 
 from . import util
+from .filter import Filter
 from .helix import Helix
+from .model import *
 
 import logging
 logger = logging.getLogger(__name__)
-
-HUMAN_URL = "https://twitch.tv"
 
 def do_oauth(args):
     helix = Helix().authenticate(
@@ -22,46 +21,6 @@ def do_oauth(args):
 
     logger.debug("token: %s", helix.token)
     print(helix.token.value)
-
-@dataclass(unsafe_hash=True)
-class User:
-    id: str
-    login: str | None = field(compare=False, default=None)
-    name: str | None = field(compare=False, default=None)
-
-    def __str__(self):
-        return self.name or self.login or repr(self)
-
-@dataclass
-class Video:
-    id: str
-    title: str
-    user: User
-    url: str
-    duration: timedelta
-    created_at: datetime
-    published_at: datetime
-
-@dataclass(unsafe_hash=True)
-class Game:
-    id: str
-    name: str | None = field(compare=False, default=None)
-
-    def __str__(self):
-        return self.name or repr(self)
-
-@dataclass(unsafe_hash=True)
-class Stream:
-    id: str
-    title: str = field(compare=False)
-    user: User = field(compare=False)
-    started_at: datetime = field(compare=False)
-    game: Game = field(compare=False)
-
-    @property
-    def url(self) -> str:
-        assert self.user.login is not None
-        return f"{HUMAN_URL}/{self.user.login}"
 
 class App:
     def __init__(self):
@@ -91,8 +50,9 @@ class App:
     def streams(self, users: Iterable[User]) -> set[Stream]:
         us = [ ("user_id", u.id) for u in users ]
         ss = set()
+        PS = 100
         while len(us) > 0:
-            for j in self.helix.paginate("/streams", params=us[:100], page_size=100):
+            for j in self.helix.paginate("/streams", params=us[:PS], page_size=PS):
                 ss.add(Stream(
                     id = j["id"],
                     title = j["title"],
@@ -107,7 +67,7 @@ class App:
                         name = j["game_name"],
                     ),
                 ))
-            us = us[100:]
+            us = us[PS:]
         return ss
 
 def do_following(args):
@@ -124,12 +84,16 @@ def do_sandbox(args):
     fs = util.pickle_cache("following", lambda: app.following(app.me))
     ss = util.pickle_cache("streams", lambda: app.streams(fs))
 
+    f = Filter()
+    ss = filter(f.stream, ss)
+    ss = sorted(ss, key=lambda s: s.started_at)
+
     now = datetime.now(UTC)
 
     table = PrettyTable()
     table.field_names = ["Channel", "Title", "Game", "Since", "URL"]
     table.align = "l"
-    for s in sorted(ss, key=lambda s: s.started_at):
+    for s in ss:
         table.add_row([
             str(s.user),
             clean(s.title)[:60],

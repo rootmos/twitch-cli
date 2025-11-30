@@ -1,5 +1,6 @@
 export TWITCH_CLI_LOG_LEVEL=DEBUG
 
+export XDG_CONFIG_HOME=$K_DIR/xdg/config
 export XDG_CACHE_HOME=$K_DIR/xdg/cache
 export XDG_STATE_HOME=$K_DIR/xdg/state
 
@@ -20,5 +21,7 @@ run() {
 }
 
 go() {
+    #rm -fv ./xdg/config/twitch_cli/filter.yaml
     run sandbox
+    #cat ./xdg/config/twitch_cli/filter.yaml
 }
