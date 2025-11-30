@@ -56,6 +56,8 @@ def main_parser():
 
     following_cmd = add_subcommand("following")
 
+    live_cmd = add_subcommand("live")
+
     return parser
 
 def main():
@@ -69,5 +71,7 @@ def main():
             app.do_sandbox(args)
         case "following":
             app.do_following(args)
+        case "live":
+            app.do_live(args)
         case cmd:
             raise NotImplementedError(cmd)

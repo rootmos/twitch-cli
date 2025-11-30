@@ -75,14 +75,11 @@ def do_following(args):
     for u in app.following(app.me):
         print(u)
 
-def clean(s: str) -> str:
-    return "".join(filter(lambda x: x in string.printable, s))
-
-def do_sandbox(args):
+def do_live(args):
     app = App()
 
-    fs = util.pickle_cache("following", lambda: app.following(app.me))
-    ss = util.pickle_cache("streams", lambda: app.streams(fs))
+    fs = app.following(app.me)
+    ss = app.streams(fs)
 
     f = Filter()
     ss = filter(f.stream, ss)
@@ -102,6 +99,12 @@ def do_sandbox(args):
             s.url,
         ])
     print(table.get_string())
+
+def clean(s: str) -> str:
+    return "".join(filter(lambda x: x in string.printable, s))
+
+def do_sandbox(args):
+    logger.info("hello")
 
 def do_sandbox0(args):
     logger.info("hello")

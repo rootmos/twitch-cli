@@ -21,7 +21,6 @@ run() {
 }
 
 go() {
-    #rm -fv ./xdg/config/twitch_cli/filter.yaml
-    run sandbox
-    #cat ./xdg/config/twitch_cli/filter.yaml
+    #run sandbox
+    run live
 }
