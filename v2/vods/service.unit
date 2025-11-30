@@ -1,0 +1,10 @@
+[Unit]
+Description=%APP% service
+
+[Service]
+Restart=never
+Environment="APP=%APP%"
+ExecStart="%SERVICE_SH%"
+
+[Install]
+WantedBy=default.target
