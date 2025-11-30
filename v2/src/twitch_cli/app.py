@@ -12,6 +12,8 @@ from .helix import Helix
 import logging
 logger = logging.getLogger(__name__)
 
+HUMAN_URL = "https://twitch.tv"
+
 def do_oauth(args):
     helix = Helix().authenticate(
         fetch_new_tokens = not args.dont_fetch_new_token,
@@ -56,6 +58,11 @@ class Stream:
     started_at: datetime = field(compare=False)
     game: Game = field(compare=False)
 
+    @property
+    def url(self) -> str:
+        assert self.user.login is not None
+        return f"{HUMAN_URL}/{self.user.login}"
+
 class App:
     def __init__(self):
         self.helix = Helix().authenticate()
@@ -91,6 +98,7 @@ class App:
                     title = j["title"],
                     user = User(
                         id = j["user_id"],
+                        login = j["user_login"],
                         name = j["user_name"],
                     ),
                     started_at = datetime.fromisoformat(j["started_at"]),
@@ -107,12 +115,29 @@ def do_following(args):
     for u in app.following(app.me):
         print(u)
 
+def clean(s: str) -> str:
+    return "".join(filter(lambda x: x in string.printable, s))
+
 def do_sandbox(args):
     app = App()
 
     fs = util.pickle_cache("following", lambda: app.following(app.me))
     ss = util.pickle_cache("streams", lambda: app.streams(fs))
-    print(ss)
+
+    now = datetime.now(UTC)
+
+    table = PrettyTable()
+    table.field_names = ["Channel", "Title", "Game", "Since", "URL"]
+    table.align = "l"
+    for s in sorted(ss, key=lambda s: s.started_at):
+        table.add_row([
+            str(s.user),
+            clean(s.title)[:60],
+            str(s.game),
+            util.render_duration(now - s.started_at),
+            s.url,
+        ])
+    print(table.get_string())
 
 def do_sandbox0(args):
     logger.info("hello")
@@ -172,7 +197,7 @@ def do_sandbox0(args):
         if v.duration < timedelta(minutes=10):
             continue
         age = util.render_duration(now - v.published_at)
-        title = "".join(filter(lambda x: x in string.printable, v.title))
+        title = clean(v.title)[:60]
         url = v.url.replace("www.twitch.tv", "twitch.tv")
         table.add_row([
             age,
