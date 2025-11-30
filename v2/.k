@@ -20,6 +20,5 @@ run() {
 }
 
 go() {
-    #run sandbox
-    run following
+    run sandbox
 }

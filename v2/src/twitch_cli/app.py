@@ -2,6 +2,7 @@ import string
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
+from typing import Iterable
 
 from prettytable import PrettyTable
 
@@ -39,6 +40,22 @@ class Video:
     created_at: datetime
     published_at: datetime
 
+@dataclass(unsafe_hash=True)
+class Game:
+    id: str
+    name: str | None = field(compare=False, default=None)
+
+    def __str__(self):
+        return self.name or repr(self)
+
+@dataclass(unsafe_hash=True)
+class Stream:
+    id: str
+    title: str = field(compare=False)
+    user: User = field(compare=False)
+    started_at: datetime = field(compare=False)
+    game: Game = field(compare=False)
+
 class App:
     def __init__(self):
         self.helix = Helix().authenticate()
@@ -49,6 +66,7 @@ class App:
             login = meta["login"],
         )
 
+    # which users is user following
     def following(self, user: User) -> set[User]:
         user = user or self.me
 
@@ -63,12 +81,40 @@ class App:
 
         return us
 
+    def streams(self, users: Iterable[User]) -> set[Stream]:
+        us = [ ("user_id", u.id) for u in users ]
+        ss = set()
+        while len(us) > 0:
+            for j in self.helix.paginate("/streams", params=us[:100], page_size=100):
+                ss.add(Stream(
+                    id = j["id"],
+                    title = j["title"],
+                    user = User(
+                        id = j["user_id"],
+                        name = j["user_name"],
+                    ),
+                    started_at = datetime.fromisoformat(j["started_at"]),
+                    game = Game(
+                        id = j["game_id"],
+                        name = j["game_name"],
+                    ),
+                ))
+            us = us[100:]
+        return ss
+
 def do_following(args):
     app = App()
     for u in app.following(app.me):
         print(u)
 
 def do_sandbox(args):
+    app = App()
+
+    fs = util.pickle_cache("following", lambda: app.following(app.me))
+    ss = util.pickle_cache("streams", lambda: app.streams(fs))
+    print(ss)
+
+def do_sandbox0(args):
     logger.info("hello")
     helix = Helix().authenticate()
 
