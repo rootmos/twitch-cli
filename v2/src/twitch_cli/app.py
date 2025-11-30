@@ -115,9 +115,14 @@ def do_live(args):
     table.field_names = ["Channel", "Title", "Game", "Since", "URL"]
     table.align = "l"
     for s in ss:
+
+        title = clean(s.title)
+        if args.title_width:
+            title = title[:args.title_width]
+
         table.add_row([
             str(s.user),
-            clean(s.title),
+            title,
             str(s.game),
             util.render_duration(now - s.started_at),
             s.url,
@@ -128,8 +133,6 @@ def clean(s: str) -> str:
     return "".join(filter(lambda x: x in string.printable, s))
 
 def do_videos(args):
-    logger.info("hello")
-
     app = App()
     f = Filter()
     fs = app.following(app.me)
@@ -152,6 +155,8 @@ def do_videos(args):
             continue
         age = util.render_duration(now - v.published_at)
         title = clean(v.title)
+        if args.title_width:
+            title = title[:args.title_width]
         url = v.url.replace("www.twitch.tv", "twitch.tv")
         table.add_row([
             age,

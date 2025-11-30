@@ -56,9 +56,14 @@ def main_parser():
 
     following_cmd = add_subcommand("following")
 
+    def add_title_width_argmunent(p):
+        p.add_argument("-w", "--title-width", type=int, default=60, help="truncate titles to WIDTH")
+
     live_cmd = add_subcommand("live")
+    add_title_width_argmunent(live_cmd)
 
     videos_cmd = add_subcommand("videos")
+    add_title_width_argmunent(videos_cmd)
 
     return parser
 
