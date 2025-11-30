@@ -54,6 +54,8 @@ def main_parser():
 
     sandbox_cmd = add_subcommand("sandbox")
 
+    following_cmd = add_subcommand("following")
+
     return parser
 
 def main():
@@ -62,8 +64,10 @@ def main():
 
     match args.cmd:
         case "oauth":
-            app.oauth(args)
+            app.do_oauth(args)
         case "sandbox":
-            app.sandbox(args)
+            app.do_sandbox(args)
+        case "following":
+            app.do_following(args)
         case cmd:
             raise NotImplementedError(cmd)

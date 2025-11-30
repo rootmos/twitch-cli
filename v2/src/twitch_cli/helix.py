@@ -32,6 +32,11 @@ class Helix:
             "Authorization": f"Bearer {token}",
         }
 
+    @property
+    def token(self) -> oauth.Token:
+        assert self._token is not None
+        return self._token
+
     def authenticate(self, fetch_new_tokens=None, force=None):
         if self._token is not None:
             return self

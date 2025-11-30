@@ -1,6 +1,6 @@
 import string
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 
 from prettytable import PrettyTable
@@ -11,19 +11,23 @@ from .helix import Helix
 import logging
 logger = logging.getLogger(__name__)
 
-def oauth(args):
+def do_oauth(args):
     helix = Helix().authenticate(
         fetch_new_tokens = not args.dont_fetch_new_token,
         force = args.force_fetch_new_token,
     )
 
-    logger.debug("token: %s", helix._token)
-    print(helix._token.value)
+    logger.debug("token: %s", helix.token)
+    print(helix.token.value)
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class User:
     id: str
-    name: str
+    login: str | None = field(compare=False, default=None)
+    name: str | None = field(compare=False, default=None)
+
+    def __str__(self):
+        return self.name or self.login or repr(self)
 
 @dataclass
 class Video:
@@ -35,7 +39,36 @@ class Video:
     created_at: datetime
     published_at: datetime
 
-def sandbox(args):
+class App:
+    def __init__(self):
+        self.helix = Helix().authenticate()
+        meta = self.helix.token.meta
+        assert meta is not None
+        self.me = User(
+            id = meta["user_id"],
+            login = meta["login"],
+        )
+
+    def following(self, user: User) -> set[User]:
+        user = user or self.me
+
+        us = set()
+        params = { "user_id": user.id }
+        for j in self.helix.paginate("/channels/followed", params=params, page_size=100):
+            us.add(User(
+                id = j["broadcaster_id"],
+                name = j["broadcaster_name"],
+                login = j["broadcaster_login"],
+            ))
+
+        return us
+
+def do_following(args):
+    app = App()
+    for u in app.following(app.me):
+        print(u)
+
+def do_sandbox(args):
     logger.info("hello")
     helix = Helix().authenticate()
 
