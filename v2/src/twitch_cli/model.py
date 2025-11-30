@@ -12,15 +12,15 @@ class User:
     def __str__(self):
         return self.name or self.login or repr(self)
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Video:
     id: str
-    title: str
-    user: User
-    url: str
-    duration: timedelta
-    created_at: datetime
-    published_at: datetime
+    title: str = field(compare=False)
+    user: User = field(compare=False)
+    url: str = field(compare=False)
+    duration: timedelta = field(compare=False)
+    created_at: datetime = field(compare=False)
+    published_at: datetime = field(compare=False)
 
 @dataclass(unsafe_hash=True)
 class Game:
@@ -42,4 +42,3 @@ class Stream:
     def url(self) -> str:
         assert self.user.login is not None
         return f"{HUMAN_URL}/{self.user.login}"
-

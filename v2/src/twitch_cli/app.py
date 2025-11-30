@@ -70,6 +70,28 @@ class App:
             us = us[PS:]
         return ss
 
+    def videos(self, user: User, since: datetime | None = None) -> set[Video]:
+        params = {"user_id": user.id, "sort": "time"}
+        vs = set()
+        for j in self.helix.paginate("/videos", params=params, page_size=10):
+            published_at = datetime.fromisoformat(j["published_at"])
+            if since and published_at < since:
+                break
+            vs.add(Video(
+                id = j["id"],
+                title = j["title"],
+                user = User(
+                    id = j["user_id"],
+                    login = j["user_login"],
+                    name = j["user_name"],
+                ),
+                url = j["url"],
+                duration = util.parse_duration(j["duration"]),
+                created_at = datetime.fromisoformat(j["created_at"]),
+                published_at = published_at,
+            ))
+        return vs
+
 def do_following(args):
     app = App()
     for u in app.following(app.me):
@@ -77,11 +99,13 @@ def do_following(args):
 
 def do_live(args):
     app = App()
+    f = Filter()
 
     fs = app.following(app.me)
+    fs = filter(f.user, fs)
+
     ss = app.streams(fs)
 
-    f = Filter()
     ss = filter(f.stream, ss)
     ss = sorted(ss, key=lambda s: s.started_at)
 
@@ -93,7 +117,7 @@ def do_live(args):
     for s in ss:
         table.add_row([
             str(s.user),
-            clean(s.title)[:60],
+            clean(s.title),
             str(s.game),
             util.render_duration(now - s.started_at),
             s.url,
@@ -103,59 +127,22 @@ def do_live(args):
 def clean(s: str) -> str:
     return "".join(filter(lambda x: x in string.printable, s))
 
-def do_sandbox(args):
+def do_videos(args):
     logger.info("hello")
 
-def do_sandbox0(args):
-    logger.info("hello")
-    helix = Helix().authenticate()
-
-    # print(list(helix.paginate("/users", params=[("login", "AdmiralBahroo")])))
-
-    def fetch_following():
-        bids = set()
-        user_id = helix._token.meta["user_id"]
-        params = { "user_id": user_id }
-        for j in helix.paginate("/channels/followed", params=params, page_size=100):
-            name = j["broadcaster_name"]
-            bid = j["broadcaster_id"]
-            logger.debug("following: %s (%s)", name, bid)
-            bids.add(bid)
-        return bids
-
-    following = list(util.pickle_cache("following", fetch_following))
-    # following = ["40972890"]
+    app = App()
+    f = Filter()
+    fs = app.following(app.me)
+    fs = filter(f.user, fs)
 
     now = datetime.now(UTC)
-    after = now - timedelta(days=3)
+    since = now - timedelta(days=1)
 
-    def fetch_videos():
-        vs = []
-        for f in following:
-            for j in helix.paginate("/videos", params={"user_id": f, "sort": "time"}, page_size=10):
-                when = datetime.fromisoformat(j["published_at"])
-                if when < after:
-                    break
-                vs.append(j)
-        return vs
-
-    ws = util.pickle_cache("videos", fetch_videos)
-
-    vs = []
-    for j in ws:
-        vs.append(Video(
-            id = j["id"],
-            title = j["title"],
-            user = User(
-                id = j["user_id"],
-                name = j["user_name"],
-            ),
-            url = j["url"],
-            duration = util.parse_duration(j["duration"]),
-            created_at = datetime.fromisoformat(j["created_at"]),
-            published_at = datetime.fromisoformat(j["published_at"]),
-        ))
-    vs.sort(key=lambda v: v.published_at)
+    vs = set()
+    for u in fs:
+        logger.debug("fetching videos from: %s", u)
+        vs |= set(filter(f.video, app.videos(u, since=since)))
+    vs = sorted(vs, key=lambda v: v.published_at)
 
     table = PrettyTable()
     table.field_names = ["When", "User", "Title", "Duration", "URL"]
@@ -164,7 +151,7 @@ def do_sandbox0(args):
         if v.duration < timedelta(minutes=10):
             continue
         age = util.render_duration(now - v.published_at)
-        title = clean(v.title)[:60]
+        title = clean(v.title)
         url = v.url.replace("www.twitch.tv", "twitch.tv")
         table.add_row([
             age,
@@ -174,3 +161,6 @@ def do_sandbox0(args):
             url,
         ])
     print(table.get_string())
+
+def do_sandbox(args):
+    logger.info("hello")

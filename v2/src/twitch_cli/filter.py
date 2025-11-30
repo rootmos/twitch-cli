@@ -44,12 +44,22 @@ class Filter:
         return os.path.join(xdg_base_dirs.xdg_config_home(), whoami, "filter.yaml")
 
     def stream(self, s: Stream) -> bool:
-        for b in [self.user(s.user), self.game(s.game), self.title(s.title)]:
+        for b in [self._user(s.user), self._game(s.game), self._title(s.title)]:
             if b is not None:
                 return b
         return True
 
-    def user(self, u: User) -> bool | None:
+    def video(self, v: Video) -> bool:
+        for b in [self._user(v.user), self._title(v.title)]:
+            if b is not None:
+                return b
+        return True
+
+    def user(self, u: User) -> bool:
+        b = self._user(u)
+        return b if b is not None else True
+
+    def _user(self, u: User) -> bool | None:
         for x in self._raw.get("include", {}).get("user", []):
             if x == u.id or (u.login and x == u.login) or (u.name and x == u.name):
                 return True
@@ -57,7 +67,7 @@ class Filter:
             if x == u.id or (u.login and x == u.login) or (u.name and x == u.name):
                 return False
 
-    def game(self, g: Game) -> bool | None:
+    def _game(self, g: Game) -> bool | None:
         for x in self._raw.get("include", {}).get("game", []):
             if x == g.id or (g.name and x == g.name):
                 return True
@@ -65,7 +75,7 @@ class Filter:
             if x == g.id or (g.name and x == g.name):
                 return False
 
-    def title(self, t: str) -> bool | None:
+    def _title(self, t: str) -> bool | None:
         for p in self._raw.get("include", {}).get("title", []):
             if re.search(p, t):
                 return True

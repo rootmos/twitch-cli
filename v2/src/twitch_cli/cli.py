@@ -58,6 +58,8 @@ def main_parser():
 
     live_cmd = add_subcommand("live")
 
+    videos_cmd = add_subcommand("videos")
+
     return parser
 
 def main():
@@ -73,5 +75,7 @@ def main():
             app.do_following(args)
         case "live":
             app.do_live(args)
+        case "videos":
+            app.do_videos(args)
         case cmd:
             raise NotImplementedError(cmd)
