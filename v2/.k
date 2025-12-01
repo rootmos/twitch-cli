@@ -21,5 +21,5 @@ run() {
 }
 
 go() {
-    run sandbox
+    run videos AdmiralBahroo
 }
