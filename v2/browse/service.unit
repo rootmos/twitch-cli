@@ -2,9 +2,8 @@
 Description=%APP% service
 
 [Service]
-Restart=never
 Environment="APP=%APP%"
-ExecStart="%SERVICE_SH%"
+ExecStart="%SERVICE_PY%"
 
 [Install]
 WantedBy=default.target
