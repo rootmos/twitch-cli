@@ -21,5 +21,5 @@ run() {
 }
 
 go() {
-    run videos AdmiralBahroo
+    run videos --since=7d AdmiralBahroo
 }

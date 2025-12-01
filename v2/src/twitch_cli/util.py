@@ -4,7 +4,6 @@ import logging
 import math
 import os
 import random
-import re
 import string
 import subprocess
 import sys
@@ -124,10 +123,10 @@ def render_duration(secs: float | int | datetime.timedelta, short=False) -> str:
         s += f"{secs}s"
     return s
 
-DURATION_PATTERN = re.compile("([0-9]+)([dDhHmMsSwW])")
 def parse_duration(string) -> None | datetime.timedelta:
+    import re
     secs = None
-    for m in DURATION_PATTERN.finditer(string):
+    for m in re.compile("([0-9]+)([dDhHmMsSwW])").finditer(string):
         n = int(m.group(1))
         t = m.group(2)
         if secs is None:

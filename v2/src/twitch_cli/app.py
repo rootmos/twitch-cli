@@ -162,7 +162,7 @@ def do_videos(args):
         us = app.users(logins=args.channel)
 
     now = datetime.now(UTC)
-    since = now - timedelta(days=1)
+    since = now - args.since
 
     vs = set()
     for u in us:

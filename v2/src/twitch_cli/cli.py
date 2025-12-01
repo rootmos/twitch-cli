@@ -11,14 +11,19 @@ import argcomplete
 import logging
 logger = logging.getLogger(__name__)
 
+class ArgumentParser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.register("type", "duration", util.parse_duration)
+
 def parse_args(build: Callable[[], argparse.ArgumentParser]) -> argparse.Namespace:
-    early = argparse.ArgumentParser(add_help=False)
+    early = ArgumentParser(add_help=False)
     main_parser = build()
 
     for p in [ early, main_parser ]:
         p.add_argument("-v", "--version", action="store_true", help="print program version, then exit")
         p.add_argument("--completion-script", action="store_true", help="print script that when sourced configures shell completion, then exit")
-        p.add_argument("--log", default=env("LOG_LEVEL", "INFO"), help="set log level")
+        p.add_argument("--log", default=env("LOG_LEVEL", "WARN"), help="set log level")
 
     args, _ = early.parse_known_args()
 
@@ -39,7 +44,7 @@ def parse_args(build: Callable[[], argparse.ArgumentParser]) -> argparse.Namespa
     return main_parser.parse_args()
 
 def main_parser():
-    parser = argparse.ArgumentParser(
+    parser = ArgumentParser(
         # description="TODO",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -65,6 +70,7 @@ def main_parser():
     videos_cmd = add_subcommand("videos")
     add_title_width_argmunent(videos_cmd)
     videos_cmd.add_argument("channel", metavar="CHANNEL", nargs="*", help="list videos from CHANNEL (if not present: all followed channels)")
+    videos_cmd.add_argument("-s", "--since", metavar="SINCE", default="3d", help="list videos published since SINCE ago", type="duration")
 
     return parser
 
