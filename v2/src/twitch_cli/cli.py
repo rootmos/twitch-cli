@@ -57,7 +57,24 @@ def main_parser():
     oauth_cmd.add_argument("-n", "--dont-fetch-new-token", action="store_true")
     oauth_cmd.add_argument("-f", "--force-fetch-new-token", action="store_true")
 
+    def add_filter_args(p):
+        g = p.add_argument_group("Filter")
+        e = g.add_mutually_exclusive_group()
+        e.add_argument("--filter", metavar="PATH", help="load filter configuration from PATH")
+        e.add_argument("-F", "--no-filter", default=False, action="store_true", help="disable filter")
+
+    def add_list_args(p):
+        g = p.add_argument_group("Lists")
+        g.add_argument("--lists", metavar="PATH", help="load lists configuration from PATH")
+        g.add_argument("-l", "--list", metavar="LIST", action="append", help="select channels from LIST")
+
+    def add_channel_args(p):
+        add_filter_args(p)
+        add_list_args(p)
+        p.add_argument("channel", metavar="CHANNEL", nargs="*")
+
     sandbox_cmd = add_subcommand("sandbox")
+    add_channel_args(sandbox_cmd)
 
     following_cmd = add_subcommand("following")
 
@@ -66,11 +83,15 @@ def main_parser():
 
     live_cmd = add_subcommand("live")
     add_title_width_argmunent(live_cmd)
+    add_channel_args(live_cmd)
 
     videos_cmd = add_subcommand("videos")
     add_title_width_argmunent(videos_cmd)
-    videos_cmd.add_argument("channel", metavar="CHANNEL", nargs="*", help="list videos from CHANNEL (if not present: all followed channels)")
     videos_cmd.add_argument("-s", "--since", metavar="SINCE", default="3d", help="list videos published since SINCE ago", type="duration")
+    add_channel_args(videos_cmd)
+
+    channels_cmd = add_subcommand("channels")
+    add_channel_args(channels_cmd)
 
     return parser
 
@@ -89,5 +110,7 @@ def main():
             app.do_live(args)
         case "videos":
             app.do_videos(args)
+        case "channels":
+            app.do_channels(args)
         case cmd:
             raise NotImplementedError(cmd)

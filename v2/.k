@@ -21,5 +21,7 @@ run() {
 }
 
 go() {
-    run videos --since=7d AdmiralBahroo
+    #run sandbox --help
+    #run sandbox -F
+    run videos -l ff -l favorites -l factorio CapnClever
 }

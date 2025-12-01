@@ -6,7 +6,7 @@ from typing import Iterable
 from prettytable import PrettyTable
 
 from . import util
-from .filter import Filter
+from .config import Filter, Lists
 from .helix import Helix
 from .model import *
 
@@ -117,19 +117,36 @@ def do_following(args):
     for u in app.following(app.me):
         print(u)
 
+def resolve_channels(app: App, args, f=None) -> Iterable[User]:
+    us = set()
+    if args.list:
+        ls = Lists(path=args.lists)
+        for l in args.list:
+            us |= ls[l]
+    for c in args.channel:
+        us.add(c)
+
+    if us:
+        us = app.users(logins=us)
+    else:
+        us = app.following(app.me)
+
+        if not args.no_filter:
+            f = f or Filter(path=args.filter)
+            us = filter(f.user, us)
+
+    return us
+
 def do_live(args):
     app = App()
-    f = Filter()
+    f = Filter(args.filter)
 
-    if args.channel is None:
-        us = app.following(app.me)
-        us = filter(f.user, us)
-    else:
-        us = app.users(logins=args.channel)
-
+    us = resolve_channels(app, args, f=f)
     ss = app.streams(us)
 
-    ss = filter(f.stream, ss)
+    if not args.no_filter:
+        ss = filter(f.stream, ss)
+
     ss = sorted(ss, key=lambda s: s.started_at, reverse=True)
 
     now = datetime.now(UTC)
@@ -153,21 +170,20 @@ def do_live(args):
 
 def do_videos(args):
     app = App()
-    f = Filter()
-
-    if args.channel is None:
-        us = app.following(app.me)
-        us = filter(f.user, us)
-    else:
-        us = app.users(logins=args.channel)
+    f = Filter(args.filter)
 
     now = datetime.now(UTC)
     since = now - args.since
 
     vs = set()
-    for u in us:
+    for u in resolve_channels(app, args, f=f):
         logger.info("fetching videos from: %s", u)
-        vs |= set(filter(f.video, app.videos(u, since=since)))
+        ws = app.videos(u, since=since)
+        if args.no_filter:
+            vs |= set(ws)
+        else:
+            vs |= set(filter(f.video, ws))
+
     vs = sorted(vs, key=lambda v: v.published_at, reverse=True)
 
     table = PrettyTable()
@@ -188,6 +204,11 @@ def do_videos(args):
             clean(v.url),
         ])
     print(table.get_string())
+
+def do_channels(args):
+    app = App()
+    for u in resolve_channels(app, args):
+        print(u)
 
 def do_sandbox(args):
     logger.info("hello")

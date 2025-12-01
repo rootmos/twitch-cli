@@ -1,6 +1,9 @@
 import os
 import re
 
+from abc import ABC, abstractmethod
+from typing import Any, Iterable
+
 import xdg_base_dirs
 import yaml
 
@@ -10,34 +13,51 @@ from . import whoami
 import logging
 logger = logging.getLogger(__name__)
 
-class Filter:
-    EMPTY = {
-        "include": {
-            "user": [],
-            "game": [],
-            "title": [],
-        },
-        "exclude": {
-            "user": [],
-            "game": [],
-            "title": [],
-        },
-    }
+class Configurable(ABC):
+    def __init__(self, path=None, thing=None, filename=None):
+        thing = thing or self.__class__.__name__.lower()
+        filename = filename or f"{thing}.yaml"
+        self.path = path or os.path.join(xdg_base_dirs.xdg_config_home(), whoami, filename)
 
-    def __init__(self, path=None):
-        self.path = path or self.default_path()
-
-        logger.debug("loading filter configuration from: %s", self.path)
+        logger.debug("attempting to load %s from: %s", thing, self.path)
         try:
             with open(self.path, "r") as f:
                 self._raw = yaml.load(f, Loader=yaml.Loader)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("loaded %s from; %s: %s", thing, self.path, self._raw)
+            else:
+                logger.info("loaded %s from: %s", thing, self.path)
         except FileNotFoundError:
-            logger.debug("populating an empty filter at: %s", self.path)
+            logger.info("populating an empty %s at: %s", thing, self.path)
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             with open(self.path, "x") as f:
-                yaml.dump(self.EMPTY, f, Dumper=yaml.Dumper)
+                yaml.dump(self.empty(), f, Dumper=yaml.Dumper)
             with open(self.path, "r") as f:
                 self._raw = yaml.load(f, Loader=yaml.Loader)
+
+    @classmethod
+    @abstractmethod
+    def empty(cls) -> Any:
+        ...
+
+class Filter(Configurable):
+    @classmethod
+    def empty(cls):
+        return {
+            "include": {
+                "user": [],
+                "game": [],
+                "title": [],
+            },
+            "exclude": {
+                "user": [],
+                "game": [],
+                "title": [],
+            },
+        }
+
+    def __init__(self, path=None):
+        super().__init__(path=path)
 
     @classmethod
     def default_path(cls):
@@ -82,3 +102,23 @@ class Filter:
         for p in self._raw.get("exclude", {}).get("title", []):
             if re.search(p, t):
                 return False
+
+class Lists(Configurable):
+    def __init__(self, path=None):
+        super().__init__(path=path)
+
+    @classmethod
+    def empty(cls):
+        return {}
+
+    def __getitem__(self, k: str) -> set[str]:
+        return set(self._raw[k])
+
+    def keys(self) -> Iterable[str]:
+        return self._raw.keys()
+
+    def __contains__(self, k: str) -> bool:
+        return k in self._raw
+
+    def __len__(self) -> int:
+        return len(self._raw)
