@@ -1,0 +1,9 @@
+[Unit]
+Description=%APP% service
+
+[Service]
+Environment="APP=%APP%"
+ExecStart="%SERVICE_PY%"
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,25 @@
+<html>
+    <head>
+        <title>$title</title>
+    </head>
+    <body>
+        <div id="status">$initial_status_text</div>
+        <script>
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "$token_path", true);
+            xhr.setRequestHeader("Content-Type", "application/json");
+            xhr.onreadystatechange = function () {
+                if(xhr.readyState === 4) {
+                    if(xhr.status === 204) {
+                        document.getElementById("status").innerHTML = "$ok_status_text";
+                    } else {
+                        document.getElementById("status").innerHTML = "$error_status_text";
+                    }
+                }
+            };
+            const params = new URLSearchParams(document.location.hash.substring(1));
+            console.log("params", params);
+            xhr.send(JSON.stringify(Object.fromEntries(params)));
+        </script>
+    </body>
+</html>
