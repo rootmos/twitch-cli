@@ -21,7 +21,5 @@ run() {
 }
 
 go() {
-    #run sandbox --help
-    #run sandbox -F
-    run live
+    run sandbox
 }

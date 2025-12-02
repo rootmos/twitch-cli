@@ -5,7 +5,7 @@ from typing import Iterable
 
 from prettytable import PrettyTable
 
-from . import util
+from . import util, whoami
 from .config import Filter, Lists
 from .helix import Helix
 from .model import *
@@ -212,3 +212,4 @@ def do_channels(args):
 
 def do_sandbox(args):
     logger.info("hello")
+    print(whoami)

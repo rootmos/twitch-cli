@@ -106,7 +106,7 @@ class OAuth:
                     self.end_headers()
                     return
 
-                with open(package_data("oauth", "redirect.html"), "r") as f:
+                with package_data("oauth", "redirect.html").open() as f:
                     raw = f.read()
 
                 body = string.Template(raw).substitute(this.mappings()).encode("UTF-8")

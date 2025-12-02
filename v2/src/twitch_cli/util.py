@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 
-from . import whoami
+from . import package_name, whoami
 
 import logging
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def setup_logger(level, logger=None, name=None):
     level = level.upper()
     if logger is None:
-        logger = logging.getLogger(name=name or whoami)
+        logger = logging.getLogger(name=name or package_name)
     logger.setLevel(level)
 
     handler = logging.StreamHandler()
