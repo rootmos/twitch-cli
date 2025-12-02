@@ -23,5 +23,5 @@ run() {
 go() {
     #run sandbox --help
     #run sandbox -F
-    run videos -l ff -l favorites -l factorio CapnClever
+    run live
 }

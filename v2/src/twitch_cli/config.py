@@ -81,27 +81,44 @@ class Filter(Configurable):
 
     def _user(self, u: User) -> bool | None:
         for x in self._raw.get("include", {}).get("user", []):
-            if x == u.id or (u.login and x == u.login) or (u.name and x == u.name):
+            if x == u.id or self._match(x, u.login) or self._match(x, u.name):
                 return True
         for x in self._raw.get("exclude", {}).get("user", []):
-            if x == u.id or (u.login and x == u.login) or (u.name and x == u.name):
+            if x == u.id or self._match(x, u.login) or self._match(x, u.name):
                 return False
 
     def _game(self, g: Game) -> bool | None:
         for x in self._raw.get("include", {}).get("game", []):
-            if x == g.id or (g.name and x == g.name):
+            if x == g.id or self._match(x, g.name):
                 return True
         for x in self._raw.get("exclude", {}).get("game", []):
-            if x == g.id or (g.name and x == g.name):
+            if x == g.id or self._match(x, g.name):
                 return False
 
     def _title(self, t: str) -> bool | None:
         for p in self._raw.get("include", {}).get("title", []):
-            if re.search(p, t):
+            if self._match(p, t):
                 return True
         for p in self._raw.get("exclude", {}).get("title", []):
-            if re.search(p, t):
+            if self._match(p, t):
                 return False
+
+    @staticmethod
+    def _match(test: int | str | None, subject: str | None) -> bool | None:
+        if subject == None:
+            return None
+        match test:
+            case None:
+                return None
+            case int():
+                try:
+                    return test == int(subject)
+                except ValueError:
+                    return False
+            case str():
+                if test.startswith("/"):
+                    return bool(re.search(test[1:], subject))
+                return test == subject
 
 class Lists(Configurable):
     def __init__(self, path=None):
