@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import Callable
 
 EXE = shutil.which("twitch")
-LOG_LEVEL = "DEBUG"
+LOG_LEVEL = "INFO"
 
 XDG_STATE_HOME = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
 STATE_DIR = os.environ.get("STATE_DIR", os.path.join(XDG_STATE_HOME, os.environ["APP"]))
@@ -34,12 +34,12 @@ def run_and_copy_stdout(cmdline, target, env=None):
         shutil.copyfile(out, target)
 
 def live():
-    target = os.path.join(STATE_DIR, "live")
+    target = os.path.join(STATE_DIR, "live.twitch")
     cmdline = [EXE, "live", "--title-width=80"]
     run_and_copy_stdout(cmdline, target, env=env())
 
 def videos():
-    target = os.path.join(STATE_DIR, "videos")
+    target = os.path.join(STATE_DIR, "videos.twitch")
     cmdline = [EXE, "videos", "--title-width=80"]
     run_and_copy_stdout(cmdline, target, env=env())
 
