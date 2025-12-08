@@ -2,6 +2,8 @@
 Description=%APP% service
 
 [Service]
+Restart=on-failure
+RestartSec=5min
 Environment="APP=%APP%"
 ExecStart="%SERVICE_PY%"
 
