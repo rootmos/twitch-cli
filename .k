@@ -21,5 +21,6 @@ run() {
 }
 
 go() {
-    run sandbox
+    #run sandbox
+    run videos-file -i foo.twitch
 }

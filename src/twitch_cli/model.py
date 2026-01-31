@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-HUMAN_URL = "https://twitch.tv"
+from twitch_cli import util
+
+CNAME = "twitch.tv"
+HUMAN_URL = "https://" + CNAME
 
 @dataclass(unsafe_hash=True)
 class User:
@@ -21,6 +24,25 @@ class Video:
     duration: timedelta = field(compare=False)
     created_at: datetime = field(compare=False)
     published_at: datetime = field(compare=False)
+
+    @classmethod
+    def from_twitch_json(cls, j):
+        duration = util.parse_duration(j["duration"])
+        assert duration is not None
+
+        return cls(
+           id = j["id"],
+           title = j["title"],
+           user = User(
+               id = j["user_id"],
+               login = j["user_login"],
+               name = j["user_name"],
+           ),
+           url = j["url"],
+           duration = duration,
+           created_at = datetime.fromisoformat(j["created_at"]),
+           published_at = datetime.fromisoformat(j["published_at"]),
+       )
 
 @dataclass(unsafe_hash=True)
 class Game:

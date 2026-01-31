@@ -1,16 +1,17 @@
+import logging
+import re
+import sys
 import string
-
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Iterable
 
 from prettytable import PrettyTable
 
-from . import util, whoami
+from . import util
 from .config import Filter, Lists
 from .helix import Helix
 from .model import *
 
-import logging
 logger = logging.getLogger(__name__)
 
 def do_oauth(args):
@@ -70,26 +71,29 @@ class App:
             us = us[PS:]
         return ss
 
-    def videos(self, user: User, since: datetime | None = None) -> set[Video]:
+    def videos_by_vid(self, *vid: str) -> list[Video]:
+        logger.debug("fetching videos by id: %s", vid)
+
+        if len(vid) > 100:
+            raise NotImplementedError()
+
+        params = [ ("id", i) for i in set(vid) ]
+        vs = {}
+        for j in self.helix.paginate("/videos", params=params, page_size=100):
+            v = Video.from_twitch_json(j)
+            vs[v.id] = v
+
+        return [ vs[i] for i in vid ]
+
+    def videos_by_user(self, user: User, since: datetime | None = None) -> set[Video]:
+        logger.debug("listing videos by user (%s) since: %s", user, since)
         params = {"user_id": user.id, "sort": "time"}
         vs = set()
         for j in self.helix.paginate("/videos", params=params, page_size=10):
             published_at = datetime.fromisoformat(j["published_at"])
             if since and published_at < since:
                 break
-            vs.add(Video(
-                id = j["id"],
-                title = j["title"],
-                user = User(
-                    id = j["user_id"],
-                    login = j["user_login"],
-                    name = j["user_name"],
-                ),
-                url = j["url"],
-                duration = util.parse_duration(j["duration"]),
-                created_at = datetime.fromisoformat(j["created_at"]),
-                published_at = published_at,
-            ))
+            vs.add(Video.from_twitch_json(j))
         return vs
 
     def users(self, logins: Iterable[str] = [], ids: Iterable[str] = []) -> set[User]:
@@ -109,7 +113,7 @@ class App:
 def clean(s: str) -> str:
     s = s.strip()
     if s.startswith("http"):
-        return s.replace("www.twitch.tv", "twitch.tv")
+        return s.replace(f"www.{CNAME}", CNAME)
     return "".join(filter(lambda x: x in string.printable, s))
 
 def do_following(args):
@@ -168,6 +172,29 @@ def do_live(args):
         ])
     print(table.get_string())
 
+def render_table_of_videos(vs, width=None, now=None) -> PrettyTable:
+    now = now or datetime.now().astimezone()
+
+    table = PrettyTable()
+    table.field_names = ["When", "User", "Title", "Duration", "URL"]
+    table.align = "l"
+    for v in vs:
+        if v.duration < timedelta(minutes=10):
+            continue
+        age = util.render_duration(now - v.published_at)
+        title = clean(v.title)
+        if width:
+            title = title[:width]
+        table.add_row([
+            age,
+            v.user.name,
+            title,
+            util.render_duration(v.duration),
+            clean(v.url),
+        ])
+
+    return table
+
 def do_videos(args):
     app = App()
     f = Filter(args.filter)
@@ -178,32 +205,41 @@ def do_videos(args):
     vs = set()
     for u in resolve_channels(app, args, f=f):
         logger.info("fetching videos from: %s", u)
-        ws = app.videos(u, since=since)
+        ws = app.videos_by_user(u, since=since)
         if args.no_filter:
             vs |= set(ws)
         else:
             vs |= set(filter(f.video, ws))
 
     vs = sorted(vs, key=lambda v: v.published_at, reverse=True)
+    print(render_table_of_videos(vs).get_string())
 
-    table = PrettyTable()
-    table.field_names = ["When", "User", "Title", "Duration", "URL"]
-    table.align = "l"
-    for v in vs:
-        if v.duration < timedelta(minutes=10):
-            continue
-        age = util.render_duration(now - v.published_at)
-        title = clean(v.title)
-        if args.title_width:
-            title = title[:args.title_width]
-        table.add_row([
-            age,
-            v.user.name,
-            title,
-            util.render_duration(v.duration),
-            clean(v.url),
-        ])
-    print(table.get_string())
+def do_videos_file(args):
+    app = App()
+
+    if args.file is None or args.file == "-":
+        ls = sys.stdin.readlines()
+    else:
+        with open(args.file) as f:
+            ls = f.readlines()
+
+    vs = []
+    pat = re.compile(rf'{CNAME}/videos/(?P<vid>\w+)')
+    for l in ls:
+        m = pat.search(l)
+        if m:
+            vs.append(m.group("vid"))
+    vs = app.videos_by_vid(*vs)
+    s = render_table_of_videos(vs).get_string()
+
+    if args.file is None or args.file == "-" or not args.in_place:
+        o = sys.stdout
+    else:
+        assert args.file is not None and args.file != "-" and args.in_place
+        o = open(args.file, "w")
+
+    with o:
+        o.write(s)
 
 def do_channels(args):
     app = App()
@@ -212,4 +248,3 @@ def do_channels(args):
 
 def do_sandbox(args):
     logger.info("hello")
-    print(whoami)

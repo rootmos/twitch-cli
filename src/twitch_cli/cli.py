@@ -90,6 +90,10 @@ def main_parser():
     videos_cmd.add_argument("-s", "--since", metavar="SINCE", default="3d", help="list videos published since SINCE ago", type="duration")
     add_channel_args(videos_cmd)
 
+    videos_file_cmd = add_subcommand("videos-file")
+    videos_file_cmd.add_argument("-i", "--in-place", action="store_true")
+    videos_file_cmd.add_argument("file", metavar="FILE", nargs="?")
+
     channels_cmd = add_subcommand("channels")
     add_channel_args(channels_cmd)
 
@@ -110,6 +114,8 @@ def main():
             app.do_live(args)
         case "videos":
             app.do_videos(args)
+        case "videos-file":
+            app.do_videos_file(args)
         case "channels":
             app.do_channels(args)
         case cmd:

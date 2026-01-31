@@ -50,7 +50,6 @@ class Task:
     callback: Callable[[], None]
 
 def poor_mans_scheduler(*tasks: Task):
-
     @dataclass
     class Scheduled:
         task: Task
