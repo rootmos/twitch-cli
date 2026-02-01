@@ -31,7 +31,7 @@ def run_and_copy_stdout(cmdline, target, env=None):
         out = os.path.join(tmp, "out")
         with open(out, "x") as f:
             subprocess.check_call(cmdline, env=env, stdout=f)
-        shutil.copyfile(out, target)
+        subprocess.check_call(["install", "--mode=0444", out, target])
 
 def live():
     target = os.path.join(STATE_DIR, "live.twitch")

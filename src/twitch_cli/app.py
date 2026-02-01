@@ -240,6 +240,7 @@ def do_videos_file(args):
 
     with o:
         o.write(s)
+        o.write('\n')
 
 def do_channels(args):
     app = App()
