@@ -1,9 +1,6 @@
 local function go(url)
     print(string.format("opening: %s", url))
-    vim.uv.spawn("www", {
-        args = { url },
-        detached = true,
-    })
+    vim.system({ "www", url }, { detached = true })
 end
 
 vim.b.yank = {
@@ -11,6 +8,7 @@ vim.b.yank = {
     "url",
 }
 
+-- TODO make sure these are actually local
 vim.wo.cursorline = true
 vim.wo.wrap = false
 vim.wo.number = false
@@ -30,16 +28,13 @@ else
         buffer = 0,
         callback = function()
             local path = vim.api.nvim_buf_get_name(0)
-            vim.uv.spawn("/home/gustav/.local/bin/twitch", {
-                args = { "videos-file", "--in-place", path },
+            vim.system({"twitch", "videos-file", "--in-place", path }, {
                 stdio = { nil, nil, 2 },
                 detached = true,
-            }, function(code, signal)
-                if code == 0 then
-                    vim.schedule(function()
-                        vim.api.nvim_command("checktime")
-                    end)
-                end
+            }, function()
+                vim.schedule(function()
+                    vim.api.nvim_command("checktime")
+                end)
             end)
         end,
     })
