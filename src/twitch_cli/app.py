@@ -218,7 +218,7 @@ def do_videos(args):
     vs = sorted(vs, key=lambda v: v.published_at, reverse=True)
 
     def render(o):
-        o.write(render_table_of_videos(vs).get_string())
+        o.write(render_table_of_videos(vs, width=args.title_width).get_string())
         o.write("\n")
 
     if args.output:
@@ -256,7 +256,7 @@ def do_videos_file(args):
         if m:
             vs.append(m.group("vid"))
     vs = app.videos_by_vid(*vs)
-    s = render_table_of_videos(vs).get_string()
+    s = render_table_of_videos(vs, width=args.title_width).get_string()
 
     if args.file is None or args.file == "-" or not args.in_place:
         o = sys.stdout

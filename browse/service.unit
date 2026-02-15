@@ -5,6 +5,7 @@ Description=%APP% service
 Restart=on-failure
 RestartSec=5min
 Environment="APP=%APP%"
+Environment="TWITCH_CLI_TITLE_WIDTH=%TITLE_WIDTH%"
 ExecStart="%SERVICE_PY%"
 
 [Install]

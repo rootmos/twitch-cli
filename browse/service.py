@@ -35,12 +35,12 @@ def run_and_copy_stdout(cmdline, target, env=None):
 
 def live():
     target = os.path.join(STATE_DIR, "live.twitch")
-    cmdline = [EXE, "live", "--title-width=80"]
+    cmdline = [EXE, "live"]
     run_and_copy_stdout(cmdline, target, env=env())
 
 def videos():
     target = os.path.join(STATE_DIR, "videos.twitch")
-    cmdline = [EXE, "videos", "--title-width=80"]
+    cmdline = [EXE, "videos"]
     run_and_copy_stdout(cmdline, target, env=env())
 
 @dataclass

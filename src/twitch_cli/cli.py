@@ -79,7 +79,7 @@ def main_parser():
     following_cmd = add_subcommand("following")
 
     def add_title_width_argmunent(p):
-        p.add_argument("-w", "--title-width", metavar="WIDTH", type=int, default=60, help="truncate titles to WIDTH")
+        p.add_argument("-w", "--title-width", metavar="WIDTH", type=int, default=env("TITLE_WIDTH"), help="truncate titles to WIDTH")
 
     live_cmd = add_subcommand("live")
     add_title_width_argmunent(live_cmd)
@@ -93,6 +93,7 @@ def main_parser():
     add_channel_args(videos_cmd)
 
     videos_file_cmd = add_subcommand("videos-file")
+    add_title_width_argmunent(videos_file_cmd)
     videos_file_cmd.add_argument("-i", "--in-place", action="store_true")
     videos_file_cmd.add_argument("file", metavar="FILE", nargs="?")
 
