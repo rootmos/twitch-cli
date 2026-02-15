@@ -4,14 +4,14 @@ import logging
 import math
 import os
 import random
+import shutil
 import string
 import subprocess
 import sys
 import tempfile
 
-from . import package_name, whoami
+from . import env, package_name, whoami
 
-import logging
 logger = logging.getLogger(__name__)
 
 def setup_logger(level, logger=None, name=None):
@@ -34,11 +34,29 @@ def fresh_salt(n=5):
     alphabeth = string.ascii_letters + string.digits
     return ''.join(random.choices(alphabeth, k=n))
 
-def interact(cwd=None, check=True):
-    shell = os.environ.get("SHELL", "/bin/sh")
-    tty = "/dev/tty"
-    cmdline = f"{shell} -i <{tty} >{tty} 2>&1"
-    subprocess.run(cmdline, shell=True, check=check, cwd=cwd)
+def find_editor():
+    e = env("EDITOR")
+    if e is not None:
+        return e
+
+    e = os.environ.get("EDITOR")
+    if e is not None:
+        return e
+
+    for e in ["nvim", "vim", "vi", "emacs", "nano"]:
+        e = shutil.which(e)
+        if e is not None:
+            return e
+
+    raise RuntimeError("unable to find an editor")
+
+def run_with_tty(*cmdline, check=None):
+    if check is None:
+        check = True
+    logger.debug(f"running with tty: {cmdline}")
+    with open("/dev/tty", "rb") as i, open("/dev/tty", "wb") as o:
+        p = subprocess.run(cmdline, check=check, stdin=i, stdout=o)
+    return p.returncode == 0
 
 def temporary_directory():
     return tempfile.TemporaryDirectory(prefix=f"{whoami}-")

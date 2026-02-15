@@ -1,7 +1,8 @@
 import logging
+import os
 import re
-import sys
 import string
+import sys
 from datetime import UTC, datetime, timedelta
 from typing import Iterable
 
@@ -73,6 +74,9 @@ class App:
 
     def videos_by_vid(self, *vid: str) -> list[Video]:
         logger.debug("fetching videos by id: %s", vid)
+
+        if len(vid) == 0:
+            return []
 
         if len(vid) > 100:
             raise NotImplementedError()
@@ -212,7 +216,29 @@ def do_videos(args):
             vs |= set(filter(f.video, ws))
 
     vs = sorted(vs, key=lambda v: v.published_at, reverse=True)
-    print(render_table_of_videos(vs).get_string())
+
+    def render(o):
+        o.write(render_table_of_videos(vs).get_string())
+        o.write("\n")
+
+    if args.output:
+        with open(args.output, "w") as o:
+            render(o)
+
+    if args.edit:
+        def do_edit(path):
+            util.run_with_tty(util.find_editor(), path)
+
+        if args.output:
+            do_edit(args.output)
+        else:
+            with util.temporary_directory() as tmp:
+                path = os.path.join(tmp, "videos.twitch")
+                with open(path, "w") as o:
+                    render(o)
+                do_edit(path)
+    elif not args.output:
+        render(sys.stdout)
 
 def do_videos_file(args):
     app = App()

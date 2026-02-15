@@ -88,6 +88,8 @@ def main_parser():
     videos_cmd = add_subcommand("videos")
     add_title_width_argmunent(videos_cmd)
     videos_cmd.add_argument("-s", "--since", metavar="SINCE", default="3d", help="list videos published since SINCE ago", type="duration")
+    videos_cmd.add_argument("-o", "--output", metavar="FILE")
+    videos_cmd.add_argument("-e", "--edit", action="store_true")
     add_channel_args(videos_cmd)
 
     videos_file_cmd = add_subcommand("videos-file")
