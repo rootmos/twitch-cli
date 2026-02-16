@@ -1,6 +1,20 @@
-local live = vim.fn.expand("$STATE_DIR/live.twitch")
-local videos = vim.fn.expand("$STATE_DIR/videos.twitch")
-local watch_later = vim.fn.expand("$HOME/lists/twitch/watch-later.twitch")
-vim.cmd { cmd = "edit", args = { watch_later } }
-vim.cmd { cmd = "split", args = { videos } }
-vim.cmd { cmd = "split", args = { live } }
+local files = {
+    "$STATE_DIR/live.twitch",
+    "$STATE_DIR/videos.twitch",
+    "$LISTS_DIR/watch-later.twitch",
+}
+
+local paths = {}
+for _, f in ipairs(files) do
+    local p = vim.fn.expand(f)
+    if vim.uv.fs_stat(p) then
+        table.insert(paths, 1, p)
+    end
+end
+
+for i, p in ipairs(paths) do
+    vim.cmd {
+        cmd = i == 1 and "edit" or "split",
+        args = { p },
+    }
+end
