@@ -4,7 +4,7 @@ import re
 import string
 import sys
 from datetime import UTC, datetime, timedelta
-from typing import Iterable
+from typing import Generator, Iterable
 
 from prettytable import PrettyTable
 
@@ -72,22 +72,22 @@ class App:
             us = us[PS:]
         return ss
 
-    def videos_by_vid(self, *vid: str) -> list[Video]:
+    def videos_by_vid(self, *vid: str) -> dict[str, Video]:
         logger.debug("fetching videos by id: %s", vid)
 
         if len(vid) == 0:
-            return []
+            return {}
 
         if len(vid) > 100:
             raise NotImplementedError()
 
         params = [ ("id", i) for i in set(vid) ]
-        vs = {}
+        vs = util.LastUpdatedOrderedDict()
         for j in self.helix.paginate("/videos", params=params, page_size=100):
             v = Video.from_twitch_json(j)
             vs[v.id] = v
 
-        return [ vs[i] for i in vid ]
+        return vs
 
     def videos_by_user(self, user: User, since: datetime | None = None) -> set[Video]:
         logger.debug("listing videos by user (%s) since: %s", user, since)
@@ -176,13 +176,17 @@ def do_live(args):
         ])
     print(table.get_string())
 
-def render_table_of_videos(vs, width=None, now=None) -> PrettyTable:
+def render_table_of_videos(vs: Iterable[Video | str], width=None, now=None) -> PrettyTable:
     now = now or datetime.now().astimezone()
 
     table = PrettyTable()
     table.field_names = ["When", "User", "Title", "Duration", "URL"]
     table.align = "l"
     for v in vs:
+        if isinstance(v, str):
+            table.add_row([ "" ] * (len(table.field_names) - 1) + [v])
+            continue
+
         if v.duration < timedelta(minutes=10):
             continue
         age = util.render_duration(now - v.published_at)
@@ -249,13 +253,15 @@ def do_videos_file(args):
         with open(args.file) as f:
             ls = f.readlines()
 
-    vs = []
     pat = re.compile(rf'{CNAME}/videos/(?P<vid>\w+)')
-    for l in ls:
-        m = pat.search(l)
-        if m:
-            vs.append(m.group("vid"))
-    vs = app.videos_by_vid(*vs)
+    def g() -> Generator[str]:
+        for l in ls:
+            m = pat.search(l)
+            if m:
+                yield m.group("vid")
+    vs = list(g())
+    ws = app.videos_by_vid(*vs)
+    vs = [ ws.get(v, f'{HUMAN_URL}/videos/{v}') for v in vs ]
     s = render_table_of_videos(vs, width=args.title_width).get_string()
 
     if args.file is None or args.file == "-" or not args.in_place:

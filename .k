@@ -22,6 +22,6 @@ run() {
 
 go() {
     #run sandbox
-    #run videos-file
-    run videos AdmiralBahroo -e
+    run videos-file ./watch-later.twitch
+    #run videos AdmiralBahroo -e
 }
