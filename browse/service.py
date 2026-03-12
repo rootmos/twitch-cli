@@ -43,11 +43,35 @@ def videos():
     cmdline = [EXE, "videos"]
     run_and_copy_stdout(cmdline, target, env=env())
 
+def _run_with_timeout_harness(q, f):
+    q.put(f())
+
+def run_with_timeout[A](f: Callable[[], A], timeout: float, what: str | None = None) -> A:
+    import multiprocessing
+
+    while True:
+        q = multiprocessing.Queue()
+        p = multiprocessing.Process(target=_run_with_timeout_harness, args=(q,f), daemon=True)
+        p.start()
+        p.join(timeout)
+        if p.is_alive():
+            p.kill()
+            raise TimeoutError(f"timeout ({what}): {timeout}s")
+        return q.get()
+
 @dataclass
 class Task:
     name: str
     period: timedelta
     callback: Callable[[], None]
+    timeout: float | None = None
+
+    def run(self):
+        run_with_timeout(
+            self.callback,
+            timeout = self.timeout or self.period.total_seconds(),
+            what = self.name,
+        )
 
 def poor_mans_scheduler(*tasks: Task):
     @dataclass
@@ -63,7 +87,7 @@ def poor_mans_scheduler(*tasks: Task):
             now = datetime.now()
             if s.at <= now:
                 eprint(f"task start: {s.task.name}")
-                s.task.callback()
+                s.task.run()
                 eprint(f"task done: {s.task.name}")
                 s.at = now + s.task.period
 
