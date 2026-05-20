@@ -44,20 +44,22 @@ def videos():
     run_and_copy_stdout(cmdline, target, env=env())
 
 def _run_with_timeout_harness(q, f):
-    q.put(f())
+    try:
+        q.put(f())
+    except Exception as e:
+        q.put(e)
 
-def run_with_timeout[A](f: Callable[[], A], timeout: float, what: str | None = None) -> A:
+def run_with_timeout[A](f: Callable[[], A], timeout: float, what: str | None = None) -> A | Exception:
     import multiprocessing
 
-    while True:
-        q = multiprocessing.Queue()
-        p = multiprocessing.Process(target=_run_with_timeout_harness, args=(q,f), daemon=True)
-        p.start()
-        p.join(timeout)
-        if p.is_alive():
-            p.kill()
-            raise TimeoutError(f"timeout ({what}): {timeout}s")
-        return q.get()
+    q = multiprocessing.Queue()
+    p = multiprocessing.Process(target=_run_with_timeout_harness, args=(q,f), daemon=True, name=what)
+    p.start()
+    p.join(timeout)
+    if p.is_alive():
+        p.kill()
+        raise TimeoutError(f"timeout ({what}): {timeout}s")
+    return q.get()
 
 @dataclass
 class Task:
@@ -66,8 +68,8 @@ class Task:
     callback: Callable[[], None]
     timeout: float | None = None
 
-    def run(self):
-        run_with_timeout(
+    def run(self) -> None | Exception:
+        return run_with_timeout(
             self.callback,
             timeout = self.timeout or self.period.total_seconds(),
             what = self.name,
@@ -87,14 +89,15 @@ def poor_mans_scheduler(*tasks: Task, on_exc: Callable[[Exception]] | None = Non
             now = datetime.now()
             if s.at <= now:
                 eprint(f"task start: {s.task.name}")
-                try:
-                    s.task.run()
-                except Exception as e:
+                x = s.task.run()
+                if x is not None:
+                    eprint(f"task failed: {s.task.name}")
                     if on_exc is None:
-                        raise e
+                        raise x
                     else:
-                        on_exc(e)
-                eprint(f"task done: {s.task.name}")
+                        on_exc(x)
+                else:
+                    eprint(f"task done: {s.task.name}")
                 s.at = now + s.task.period
 
         now = datetime.now()
