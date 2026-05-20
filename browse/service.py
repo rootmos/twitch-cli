@@ -3,10 +3,10 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
-import sys
-
+import traceback
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable
@@ -73,7 +73,7 @@ class Task:
             what = self.name,
         )
 
-def poor_mans_scheduler(*tasks: Task):
+def poor_mans_scheduler(*tasks: Task, on_exc: Callable[[Exception]] | None = None):
     @dataclass
     class Scheduled:
         task: Task
@@ -87,7 +87,13 @@ def poor_mans_scheduler(*tasks: Task):
             now = datetime.now()
             if s.at <= now:
                 eprint(f"task start: {s.task.name}")
-                s.task.run()
+                try:
+                    s.task.run()
+                except Exception as e:
+                    if on_exc is None:
+                        raise e
+                    else:
+                        on_exc(e)
                 eprint(f"task done: {s.task.name}")
                 s.at = now + s.task.period
 
@@ -103,7 +109,7 @@ def main():
     os.makedirs(STATE_DIR, exist_ok=True)
     a = Task("live", timedelta(minutes=5), live)
     b = Task("videos", timedelta(minutes=15), videos)
-    poor_mans_scheduler(a, b)
+    poor_mans_scheduler(a, b, on_exc=traceback.print_exception)
 
 if __name__ == "__main__":
     main()

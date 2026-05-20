@@ -12,15 +12,19 @@ from . import package_version, whoami
 import logging
 logger = logging.getLogger(__name__)
 
+# https://docs.python-requests.org/en/latest/user/advanced/#timeouts
+DEFAULT_TIMEOUT = 10
+
 class Helix:
     base_url = "https://api.twitch.tv/helix"
     client_id = "dqfe0to2kp1pj0yvs3rpvuupdn1u6d"
     authorize_url = "https://id.twitch.tv/oauth2/authorize"
     validate_url = "https://id.twitch.tv/oauth2/validate"
 
-    def __init__(self, token=None):
+    def __init__(self, token=None, timeout=DEFAULT_TIMEOUT):
         self._token = token
         self.session = requests.Session()
+        self.timeout = timeout
 
         self.scopes = [ "user:read:follows" ]
 
@@ -70,7 +74,7 @@ class Helix:
 
                 req = requests.Request("GET", this.validate_url, headers=hdr)
                 preq = this.session.prepare_request(req)
-                rsp = this.session.send(preq)
+                rsp = this.session.send(preq, timeout=this.timeout)
                 if rsp.status_code == requests.codes.unauthorized:
                     return False
                 rsp.raise_for_status()
@@ -105,7 +109,7 @@ class Helix:
         self.log_request(req)
 
         preq = self.session.prepare_request(req)
-        rsp = self.session.send(preq)
+        rsp = self.session.send(preq, timeout=self.timeout)
         if rsp.status_code == 429:
             raise NotImplementedError(rsp)
         rsp.raise_for_status()
@@ -138,7 +142,7 @@ class Helix:
             req = build(after)
             self.log_request(req)
             preq = self.session.prepare_request(req)
-            rsp = self.session.send(preq)
+            rsp = self.session.send(preq, timeout=self.timeout)
             rsp.raise_for_status()
             j = rsp.json()
 
