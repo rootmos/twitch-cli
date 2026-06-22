@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Callable
 
 EXE = shutil.which("twitch")
+assert EXE is not None
 LOG_LEVEL = "INFO"
 
 XDG_STATE_HOME = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
